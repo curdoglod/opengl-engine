@@ -89,9 +89,7 @@ bool Sprite::loadTextureFromMemory(const std::vector<unsigned char>& imageData) 
 
 
 void Sprite::initRenderData() {
-    // Define vertex positions and texture coordinates for a rectangle (quad)
     float vertices[] = {
-        // Position   // Texture coordinates
         0.0f, 1.0f,   0.0f, 1.0f,  // bottom-left
         1.0f, 1.0f,   1.0f, 1.0f,  // bottom-right
         1.0f, 0.0f,   1.0f, 0.0f,  // top-right
@@ -112,32 +110,25 @@ void Sprite::initRenderData() {
       glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
       glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-      // Position (2 components)
       glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
       glEnableVertexAttribArray(0);
-      // Texture coordinates (2 components)
       glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
       glEnableVertexAttribArray(1);
     glBindVertexArray(0);
 }
 
-//
-// Rendering
-//
 void Sprite::draw() {
-    // Render using internal position and angle
     draw(Vector2(static_cast<float>(posX), static_cast<float>(posY)), rotation);
 }
 
 void Sprite::draw(const Vector2& pos, float angle) {
-    // Update position and angle
     posX = static_cast<int>(pos.x);
     posY = static_cast<int>(pos.y);
     rotation = angle;
     GLuint prog = ResourceManager::Get().GetOrCreateShader("sprite", vertexShaderSource, fragmentShaderSource);
     glUseProgram(prog);
 
-    // Build model matrix: translate, rotate around center, and scale
+    // Build model matrix: translate, rotate around center, then scale.
     glm::mat4 model = glm::mat4(1.0f);
     model = glm::translate(model, glm::vec3(pos.x, pos.y, 0.0f));
     model = glm::translate(model, glm::vec3(width * 0.5f, height * 0.5f, 0.0f));
@@ -145,8 +136,6 @@ void Sprite::draw(const Vector2& pos, float angle) {
     model = glm::translate(model, glm::vec3(-width * 0.5f, -height * 0.5f, 0.0f));
     model = glm::scale(model, glm::vec3(width, height, 1.0f));
 
-    // Create orthographic projection
-    // Window assumed to be 800x480; adjust as needed.
     glm::mat4 projection = Renderer::Get().GetOrthoProjection();
     
     struct Uniforms {
@@ -168,23 +157,16 @@ void Sprite::draw(const Vector2& pos, float angle) {
     glUniformMatrix4fv(u.model, 1, GL_FALSE, glm::value_ptr(model));
     glUniformMatrix4fv(u.projection, 1, GL_FALSE, glm::value_ptr(projection));
 
-    // Set sprite color and opacity
     glUniform4f(u.spriteColor, r, g, b, a);
 
-    // Bind texture
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureID);
     glUniform1i(u.spriteTexture, 0);
 
-    // Draw quad
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 }
-
-//
-// Setters and getters
-//
 void Sprite::setPosition(int x, int y) {
     posX = x;
     posY = y;

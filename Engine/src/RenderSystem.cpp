@@ -18,7 +18,6 @@ void RenderSystem::Render(Scene *scene)
     if (!scene)
         return;
 
-    // ── 1. Find active camera ────────────────────────────────────────
     CameraComponent *cam = CameraComponent::FindActive(scene);
     glm::mat4 view;
     glm::mat4 projection;
@@ -40,38 +39,31 @@ void RenderSystem::Render(Scene *scene)
             0.1f, 100.0f);
     }
 
-    // ── 2. Extract camera frustum for culling ────────────────────────
     Frustum frustum;
     frustum.Extract(projection * view);
 
-    // ── 3. Find active light ─────────────────────────────────────────
     LightComponent *light = LightComponent::FindActive(scene);
 
-    // ── 4. Shadow pass ───────────────────────────────────────────────
     if (light && light->IsShadowEnabled())
     {
         light->RenderShadowMap(scene);
     }
 
-    // ── 5. Colour pass ───────────────────────────────────────────────
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // ── 5a. Voxel chunks (3D, depth ON, frustum-culled per chunk) ────
     if (IVoxelRenderer::s_instance)
     {
         glEnable(GL_DEPTH_TEST);
         IVoxelRenderer::s_instance->RenderChunks(view, projection, light, frustum);
     }
 
-    // ── 5b. All objects in layer order (3D + 2D mixed) ───────────────
     const auto &objects = scene->GetObjects();
     for (auto *obj : objects)
     {
         if (!obj->IsActive())
             continue;
 
-        // 3D model — depth test ON, frustum-culled
         auto *model = obj->GetComponent<Model3DComponent>();
         if (model)
         {

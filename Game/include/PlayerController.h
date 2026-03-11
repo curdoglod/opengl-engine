@@ -13,23 +13,9 @@
 
 class HotbarComponent;
 
-// ============================================================================
-// PlayerController — first-person camera controller (Minecraft-style).
-//
-// The owning Object is an invisible "body" that only carries position and a
-// collider (no visible model).  The attached CameraComponent's owning Object
-// is moved to match the player's eye position every frame.
-//
-// Responsibilities:
-//   • WASD movement relative to camera yaw (horizontal only)
-//   • Mouse-look (yaw / pitch)
-//   • Simple gravity + ground collision via the world grid
-//   • Block place / destroy raycasting on mouse click
-// ============================================================================
+
 class PlayerController : public Component
 {
-	// Maximum number of ray steps when raycasting for block interaction.
-	// Reach = kRaycastSteps * blockSize * 0.4  (≈ 16 blocks with default settings)
 	static constexpr int kRaycastSteps = 20;
 
 public:
@@ -38,8 +24,6 @@ public:
 	{
 	}
 
-	// --- Setup helpers (call before adding to Object) -----------------------
-
 	void SetCamera(Object *cam) { cameraObject = cam; }
 	void SetMoveSpeed(float s) { moveSpeed = s; }
 	void SetMouseSensitivity(float s) { mouseSensitivity = s; }
@@ -47,17 +31,13 @@ public:
 	void SetJumpSpeed(float s) { jumpSpeed = s; }
 	void SetGravity(float g) { gravity = g; }
 
-	// --- Component interface ------------------------------------------------
-
 	void Init() override
 	{
-		// The player object should NOT have a visible model.
-		// It only needs a position in the world.
+
 	}
 
 	void Update(float dt) override;
 
-	// --- Input events -------------------------------------------------------
 
 	void OnMouseButtonDown(Vector2) override;
 
@@ -68,9 +48,7 @@ public:
 	void SetHotbar(HotbarComponent *hb);
 
 private:
-	// --- Helpers ------------------------------------------------------------
 
-	/// Compute the unit look direction from yaw + pitch.
 	Vector3 getLookDirection() const
 	{
 		const float toRad = 3.1415926535f / 180.0f;
@@ -81,8 +59,6 @@ private:
 		return Vector3(sy * cp, -sp, -cy * cp);
 	}
 
-	/// Raycast from camera and highlight the first block hit.
-	/// Also caches hit coordinates so OnMouseButtonDown can reuse them.
 	void updateHoveredBlock(WorldGridComponent *grid, float dt)
 	{
 		hoverRayTimer += dt;
@@ -127,7 +103,6 @@ private:
 			grid->ClearHighlight();
 	}
 
-	/// Find the WorldGridComponent in the scene (cached after first lookup).
 	WorldGridComponent *findGrid()
 	{
 		if (cachedGrid)
@@ -147,8 +122,7 @@ private:
 		return nullptr;
 	}
 
-	/// Get the Y world coordinate of the top of the highest block column
-	/// under the player's feet.
+
 	float getGroundLevel(WorldGridComponent *grid, const Vector3 &pos) const
 	{
 		int gx, gy, gz;
@@ -156,12 +130,10 @@ private:
 		{
 			return 0.0f;
 		}
-		// Scan downward from current grid Y to find the top solid block
 		for (int y = gy; y >= 0; --y)
 		{
 			if (grid->GetBlock(gx, y, gz))
 			{
-				// Top of this block
 				Vector3 blockWorld = grid->GridToWorld(gx, y, gz);
 				return blockWorld.y + grid->GetBlockSize() * 0.5f;
 			}
@@ -215,12 +187,9 @@ private:
 		return false;
 	}
 
-	/// If the player's center is inside a solid block, push them out to the
-	/// nearest free side so they don't get permanently stuck.
 	void pushOutOfBlocks(WorldGridComponent *grid, Vector3 &pos) const
 	{
 		float bs = grid->GetBlockSize();
-		// Check at feet level (slightly above)
 		float checkY = pos.y + 1.0f;
 		int gx, gy, gz;
 		if (!grid->WorldToGrid(Vector3(pos.x, checkY, pos.z), gx, gy, gz))
@@ -228,8 +197,6 @@ private:
 		if (!grid->GetBlock(gx, gy, gz))
 			return;
 
-		// Player center is inside block (gx, gy, gz). Find nearest empty
-		// neighbor and push toward it.
 		Vector3 blockCenter = grid->GridToWorld(gx, gy, gz);
 		float dx = pos.x - blockCenter.x;
 		float dz = pos.z - blockCenter.z;
@@ -281,17 +248,14 @@ private:
 	float pitch;
 	float mouseSensitivity;
 
-	// Cached references
 	WorldGridComponent *cachedGrid = nullptr;
 	HotbarComponent *hotbar = nullptr;
 
-	// Cached raycast results (reused by click handler)
-	bool rayHitValid = false;       // true if last raycast hit a block
-	int rayHitGx = 0, rayHitGy = 0, rayHitGz = 0;     // grid coords of hit block
-	bool rayHasEmpty = false;       // true if there's an empty cell before the hit
-	int rayEmptyGx = 0, rayEmptyGy = 0, rayEmptyGz = 0; // grid coords of last empty cell
+	bool rayHitValid = false;
+	int rayHitGx = 0, rayHitGy = 0, rayHitGz = 0; 
+	bool rayHasEmpty = false;
+	int rayEmptyGx = 0, rayEmptyGy = 0, rayEmptyGz = 0;
 
-	// Throttle hover raycast so it doesn't run every single frame
 	float hoverRayTimer = 0.0f;
-	static constexpr float kHoverRayInterval = 0.03f; // ~33 Hz is enough for highlight
+	static constexpr float kHoverRayInterval = 0.03f; 
 };

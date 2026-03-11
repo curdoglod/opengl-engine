@@ -20,17 +20,12 @@
 #include <deque>
 #include <iostream>
 
-// ============================================================================
-//  Chunk-based infinite world grid  (BATCHED MESH RENDERING)
-//
 //  Instead of creating one Object per block, we store block data in arrays
 //  and build a single mesh per chunk containing ONLY the exposed faces.
 //  This reduces draw calls from ~5000+ to ~100 (2-3 per chunk).
-// ============================================================================
 
 static constexpr int CHUNK_SIZE = 16;
 
-// ---- Chunk coordinate key --------------------------------------------------
 struct ChunkCoord {
 	int cx, cz;
 	bool operator==(const ChunkCoord& o) const { return cx == o.cx && cz == o.cz; }
@@ -41,10 +36,8 @@ struct ChunkCoordHash {
 	}
 };
 
-// ---- Single chunk ----------------------------------------------------------
 struct Chunk {
 	ChunkCoord coord;
-	// Block data — packed (lx, ly, lz) -> BlockType.  Absent key = air.
 	std::unordered_map<int, BlockType> blocks;
 	bool generated = false;
 	bool meshDirty = true;
@@ -59,9 +52,6 @@ struct Chunk {
 	}
 };
 
-// ============================================================================
-//  WorldGridComponent
-// ============================================================================
 class WorldGridComponent : public Component {
 public:
 	WorldGridComponent()
@@ -93,7 +83,6 @@ public:
 		rebuildDirtyMeshes();
 	}
 
-	// ---- Configuration -----------------------------------------------------
 	void SetBlockSize(float s)  { blockSize = s; }
 	void SetRenderDistance(int n) { renderDistance = n; }
 	void SetSeed(unsigned int s) { worldSeed = s; }
@@ -103,7 +92,6 @@ public:
 	}
 	float GetBlockSize() const { return blockSize; }
 
-	// ---- Backward-compatible no-ops ----------------------------------------
 	void SetSize(int, int) {}
 	void SetOrigin(float, float) {}
 	void SetMaxRenderDistance(float) {}
@@ -118,7 +106,6 @@ public:
 		surfaceType = surface; undergroundType = underground;
 	}
 
-	// ---- Coordinate conversion ---------------------------------------------
 	bool WorldToGrid(const Vector3& world, int& gx, int& gy, int& gz) const {
 		gx = (int)std::floor(world.x / blockSize + 0.5f);
 		gz = (int)std::floor(world.z / blockSize + 0.5f);
@@ -129,9 +116,7 @@ public:
 		return Vector3(gx * blockSize, gy * blockSize, gz * blockSize);
 	}
 
-	// ---- Block access (data-level, no Objects) -----------------------------
 
-	/// Check if a solid block exists at global grid coords.
 	bool HasBlock(int gx, int gy, int gz) const {
 		int cx, cz, lx, lz;
 		globalToChunk(gx, gz, cx, cz, lx, lz);
@@ -140,8 +125,7 @@ public:
 		return it->second->blocks.count(Chunk::packLocal(lx, gy, lz)) > 0;
 	}
 
-	/// Backward-compatible GetBlock: returns non-null sentinel if block exists.
-	/// DO NOT dereference the return value.
+
 	Object* GetBlock(int gx, int gy, int gz) const {
 		return HasBlock(gx, gy, gz) ? reinterpret_cast<Object*>(1) : nullptr;
 	}
@@ -178,7 +162,6 @@ public:
 		}
 	}
 
-	// 2D convenience
 	Object* GetBlock(int gx, int gz) const { return GetBlock(gx, 0, gz); }
 	Object* CreateBlockAt(int gx, int gz, BlockType type) { return CreateBlockAt(gx, 0, gz, type); }
 	void RemoveBlockAt(int gx, int gz) { RemoveBlockAt(gx, 0, gz); }
@@ -204,7 +187,6 @@ public:
 			}
 	}
 
-	// ---- Highlight (used by PlayerController) ------------------------------
 	void SetHighlightBlock(int gx, int gy, int gz) {
 		VoxelRenderer::Get().SetHighlight(glm::vec3(gx * blockSize, gy * blockSize, gz * blockSize), true, blockSize * 0.5f);
 	}
@@ -214,7 +196,6 @@ public:
 
 private:
 
-	// ---- Coordinate helpers ------------------------------------------------
 	static void globalToChunk(int gx, int gz, int& cx, int& cz, int& lx, int& lz) {
 		cx = (gx >= 0) ? (gx / CHUNK_SIZE) : ((gx - CHUNK_SIZE + 1) / CHUNK_SIZE);
 		cz = (gz >= 0) ? (gz / CHUNK_SIZE) : ((gz - CHUNK_SIZE + 1) / CHUNK_SIZE);
@@ -222,7 +203,6 @@ private:
 		lz = gz - cz * CHUNK_SIZE;
 	}
 
-	// ---- Deterministic noise -----------------------------------------------
 	static float hashNoise(int x, int z, unsigned int seed) {
 		unsigned int n = (unsigned int)(x * 73856093) ^ (unsigned int)(z * 19349663) ^ seed;
 		n = (n << 13) ^ n;
@@ -252,7 +232,6 @@ private:
 		return std::max(1, baseHeight + (int)(combined * maxHillHeight));
 	}
 
-	// ---- Chunk lifecycle ---------------------------------------------------
 	Chunk* getOrCreateChunk(int cx, int cz) {
 		ChunkCoord cc{cx, cz};
 		auto it = chunks.find(cc);
@@ -380,11 +359,8 @@ private:
 		for (auto& cc : toUnload) unloadChunk(cc.cx, cc.cz);
 	}
 
-	// ========================================================================
-	//  Mesh building — generates GPU geometry for one chunk.
 	//  Only exposed faces (neighbour is air) are emitted.
 	//  Faces are grouped by block type so each group uses one texture.
-	// ========================================================================
 
 	void buildChunkMesh(Chunk* chunk) {
 		if (chunk->blocks.empty()) { 
@@ -445,7 +421,6 @@ private:
 		return it->second->blocks.count(Chunk::packLocal(lx, gy, lz)) > 0;
 	}
 
-	// ---- Face generation ---------------------------------------------------
 	// Vertex layout: pos(3) + normal(3) + uv(2) = 8 floats
 	// Winding: CCW from outside (matches GL_CULL_FACE GL_BACK GL_CCW)
 
@@ -498,8 +473,6 @@ private:
 		inds.push_back(base);     inds.push_back(base + 1); inds.push_back(base + 2);
 		inds.push_back(base);     inds.push_back(base + 2); inds.push_back(base + 3);
 	}
-
-	// ---- Texture helpers ---------------------------------------------------
 
 	void preloadTextures() {
 		auto& rm = ResourceManager::Get();

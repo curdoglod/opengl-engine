@@ -14,7 +14,6 @@ void PlayerController::Update(float dt)
 
     auto &input = InputManager::Get();
 
-    // ---- Mouse look ----------------------------------------------------
     Vector2 mouseDelta = input.GetMouseDelta();
     yaw += mouseDelta.x * mouseSensitivity;
     pitch += mouseDelta.y * mouseSensitivity;
@@ -23,13 +22,11 @@ void PlayerController::Update(float dt)
     Vector3 pos = object->GetPosition3D();
     WorldGridComponent *grid = findGrid();
 
-    // ---- Push out of any block we are stuck inside ---------------------
     if (grid)
     {
         pushOutOfBlocks(grid, pos);
     }
 
-    // ---- Horizontal movement (WASD relative to yaw) --------------------
     float vertical = (input.IsKeyDown(SDLK_w) ? 1.0f : 0.0f) + (input.IsKeyDown(SDLK_s) ? -1.0f : 0.0f);
     float horizontal = (input.IsKeyDown(SDLK_d) ? 1.0f : 0.0f) + (input.IsKeyDown(SDLK_a) ? -1.0f : 0.0f);
 
@@ -80,14 +77,12 @@ void PlayerController::Update(float dt)
         }
     }
 
-    // ---- Vertical movement (gravity + jump) ----------------------------
     if (input.IsKeyDown(SDLK_SPACE) && isGrounded)
     {
         velocityY = jumpSpeed;
         isGrounded = false;
     }
 
-    // ---- Hotbar slot selection (keys 1-9) ----------------------------------
     for (int i = 0; i < 9; ++i)
     {
         if (input.IsKeyDown(SDLK_1 + i))
@@ -101,7 +96,6 @@ void PlayerController::Update(float dt)
     velocityY += gravity * dt;
     pos.y += velocityY * dt;
 
-    // ---- Ground / ceiling collision against the world grid --------------
     if (grid)
     {
         float groundY = getGroundLevel(grid, pos);
@@ -115,7 +109,8 @@ void PlayerController::Update(float dt)
         {
             isGrounded = false;
         }
-        // Ceiling collision: if jumping into a block above, stop.
+
+        // Stop upward velocity if the head collides with a block.
         float headY = pos.y + eyeHeight;
         int gx, gy, gz;
         if (grid->WorldToGrid(Vector3(pos.x, headY, pos.z), gx, gy, gz))
@@ -133,14 +128,12 @@ void PlayerController::Update(float dt)
 
     object->SetPosition(pos);
 
-    // ---- Sync camera to player eye position ----------------------------
     if (cameraObject)
     {
         cameraObject->SetPosition(Vector3(pos.x, pos.y + eyeHeight, pos.z));
         cameraObject->SetRotation(Vector3(pitch, yaw, 0.0f));
     }
 
-    // ---- Highlight block under crosshair --------------------------------
     updateHoveredBlock(grid, dt);
 }
 
@@ -157,7 +150,7 @@ void PlayerController::OnMouseButtonDown(Vector2)
     if (!grid)
         return;
 
-    // Force an immediate raycast refresh so cached data is up-to-date
+    // Force immediate raycast refresh so click uses current crosshair target.
     hoverRayTimer = kHoverRayInterval;
     updateHoveredBlock(grid, 0.0f);
 
@@ -166,7 +159,6 @@ void PlayerController::OnMouseButtonDown(Vector2)
 
     if (isLeftClick)
     {
-        // Destroy the block we are looking at (cached from raycast)
         if (grid->HasBlock(rayHitGx, rayHitGy, rayHitGz))
         {
             grid->RemoveBlockAt(rayHitGx, rayHitGy, rayHitGz);
@@ -175,7 +167,6 @@ void PlayerController::OnMouseButtonDown(Vector2)
     }
     else if (isRightClick)
     {
-        // Place block in the last empty cell before the hit block
         if (rayHasEmpty && hotbar)
         {
             grid->CreateBlockAt(rayEmptyGx, rayEmptyGy, rayEmptyGz, hotbar->GetSelectedSlot());

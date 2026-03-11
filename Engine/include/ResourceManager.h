@@ -7,13 +7,11 @@
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 
-struct SDL_Surface;  // forward declaration — avoid pulling in all of SDL.h
+struct SDL_Surface;
 
-// ---------------------------------------------------------------------------
 // Shared mesh data — geometry owned by ResourceManager, shared across all
 // Model3DComponent instances that load the same file.  This avoids parsing
 // the FBX / OBJ with Assimp once per block in a voxel world.
-// ---------------------------------------------------------------------------
 struct SharedMeshEntry {
     GLuint VAO        = 0;
     GLuint VBO        = 0;
@@ -28,8 +26,6 @@ struct SharedMeshData {
     glm::vec3 aabbMax = glm::vec3(-1e9f);
 };
 
-/// ResourceManager — central cache for GPU resources (textures + shaders).
-///
 /// All resources are indexed by a string key:
 ///   - textures from disk:   the full file path
 ///   - textures from memory: a user-supplied key (e.g. archive-relative path)
@@ -45,16 +41,13 @@ public:
     ResourceManager(const ResourceManager&) = delete;
     ResourceManager& operator=(const ResourceManager&) = delete;
 
-    // ── Textures ─────────────────────────────────────────────────────────────
 
-    // ── Meshes ───────────────────────────────────────────────────────────────
 
     /// Load a 3-D model from a file path.  Returns shared (cached) geometry so
     /// every component that uses the same file shares the same VAO/VBO/EBO.
     /// Returns nullptr on failure.
     const SharedMeshData* GetOrLoadMesh(const std::string& path);
 
-    // ── Textures ─────────────────────────────────────────────────────────────
 
     /// Load a texture from a file path.  Returns the cached GLuint on repeat calls.
     GLuint LoadTexture(const std::string& path);
@@ -64,7 +57,6 @@ public:
     GLuint LoadTextureFromMemory(const std::string& key,
                                   const std::vector<unsigned char>& data);
 
-    // ── Shaders ──────────────────────────────────────────────────────────────
 
     /// Return a compiled + linked shader program by name.
     /// If not yet compiled, builds it from the provided GLSL sources.
@@ -72,9 +64,6 @@ public:
                               const char* vertSrc,
                               const char* fragSrc);
 
-    // ── Lifecycle ────────────────────────────────────────────────────────────
-
-    /// Delete all cached GL objects.  Call before the GL context is destroyed.
     void ReleaseAll();
 
 private:

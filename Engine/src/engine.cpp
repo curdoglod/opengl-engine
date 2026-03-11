@@ -44,7 +44,6 @@ struct Engine::Impl
 
     void Tick(float deltaTime)
     {
-        // Clean up scenes that were replaced/popped last frame.
         sceneManager.FlushPending();
 
         int ww, wh;
@@ -77,7 +76,6 @@ struct Engine::Impl
         if (active != nullptr)
             active->UpdateScene(deltaTime);
 
-        // Render all objects via the centralised RenderSystem
         active = sceneManager.GetActiveScene();
         if (active != nullptr)
             RenderSystem::Render(active);
@@ -100,7 +98,6 @@ ArchiveUnpacker *Engine::Impl::ResourcesArchive = nullptr;
 
 Engine::Engine() : impl(new Impl())
 {
-    // Initialize SDL
     SDL_Init(SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG);
     TTF_Init();
@@ -192,7 +189,6 @@ Engine::~Engine()
     SDL_DestroyWindow(impl->m_window);
     IMG_Quit();
     SDL_Quit();
-    // sceneManager clears all scenes in its own destructor (part of Impl)
     delete impl->DefaultArchive;
     delete impl->ResourcesArchive;
     delete impl;

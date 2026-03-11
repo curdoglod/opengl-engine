@@ -7,7 +7,7 @@ glm::mat4 CameraComponent::GetViewMatrix() const {
     Vector3 pos = object->GetPosition3D();
     Vector3 ang = object->GetAngle();
     glm::mat4 view = glm::mat4(1.0f);
-    // Yaw-Pitch-Roll rotations (Z after Y after X)
+
     view = glm::rotate(view, glm::radians(ang.x), glm::vec3(1,0,0));
     view = glm::rotate(view, glm::radians(ang.y), glm::vec3(0,1,0));
     view = glm::rotate(view, glm::radians(ang.z), glm::vec3(0,0,1));
