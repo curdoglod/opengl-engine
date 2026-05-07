@@ -1,38 +1,44 @@
 #pragma once
+
 #include "component.h"
 #include "object.h"
 #include "Scene.h"
 #include "BlockComponent.h"
 #include "CameraComponent.h"
-#include "LightComponent.h"
 #include "ResourceManager.h"
 #include "VoxelRenderer.h"
-#include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <unordered_map>
-#include <string>
-#include <random>
-#include <cmath>
-#include <vector>
-#include <functional>
-#include <climits>
-#include <deque>
-#include <iostream>
 
-//  Instead of creating one Object per block, we store block data in arrays
-//  and build a single mesh per chunk containing ONLY the exposed faces.
-//  This reduces draw calls from ~5000+ to ~100 (2-3 per chunk).
+#include <glm/glm.hpp>
+
+#include <algorithm>
+#include <climits>
+#include <cmath>
+#include <deque>
+#include <functional>
+#include <random>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+// WorldGridComponent keeps a Minecraft-like world as block data, not as one
+// Object per cube. Blocks are grouped into chunks, and every chunk is rendered
+// as a small set of meshes containing only visible faces.
 
 static constexpr int CHUNK_SIZE = 16;
 
 struct ChunkCoord {
-	int cx, cz;
-	bool operator==(const ChunkCoord& o) const { return cx == o.cx && cz == o.cz; }
+	int cx = 0;
+	int cz = 0;
+
+	bool operator==(const ChunkCoord& other) const {
+		return cx == other.cx && cz == other.cz;
+	}
 };
+
 struct ChunkCoordHash {
-	size_t operator()(const ChunkCoord& c) const {
-		return std::hash<long long>()(((long long)c.cx << 32) | (unsigned int)c.cz);
+	size_t operator()(const ChunkCoord& coord) const {
+		long long packed = ((long long)coord.cx << 32) | (unsigned int)coord.cz;
+		return std::hash<long long>()(packed);
 	}
 };
 
@@ -42,13 +48,16 @@ struct Chunk {
 	bool generated = false;
 	bool meshDirty = true;
 
-	static int packLocal(int lx, int ly, int lz) {
+	// lx/lz are inside [0, 15], so they fit in 4 bits each. ly uses the
+	// remaining upper bits. This lets the chunk store blocks in one hash map.
+	static int PackLocal(int lx, int ly, int lz) {
 		return (ly << 8) | (lz << 4) | lx;
 	}
-	static void unpackLocal(int key, int& lx, int& ly, int& lz) {
+
+	static void UnpackLocal(int key, int& lx, int& ly, int& lz) {
 		lx = key & 0xF;
 		lz = (key >> 4) & 0xF;
-		ly = (key >> 8);
+		ly = key >> 8;
 	}
 };
 
@@ -68,7 +77,9 @@ public:
 
 	~WorldGridComponent() {
 		VoxelRenderer::Get().Clear();
-		for (auto& kv : chunks) delete kv.second;
+		for (auto& pair : chunks) {
+			delete pair.second;
+		}
 		chunks.clear();
 	}
 
@@ -78,87 +89,131 @@ public:
 	}
 
 	void Update(float dt) override {
+		(void)dt;
+
 		updateChunksAroundPlayer();
 		processGenerationQueue();
 		rebuildDirtyMeshes();
 	}
 
-	void SetBlockSize(float s)  { blockSize = s; }
-	void SetRenderDistance(int n) { renderDistance = n; }
-	void SetSeed(unsigned int s) { worldSeed = s; }
-	void SetTerrainParams(int base, int hill, BlockType surface, BlockType underground) {
-		baseHeight = base; maxHillHeight = hill;
-		surfaceType = surface; undergroundType = underground;
-	}
+	// ---------------------------------------------------------------------
+	// Public setup
+	// ---------------------------------------------------------------------
+
+	void SetBlockSize(float size) { blockSize = size; }
 	float GetBlockSize() const { return blockSize; }
 
+	void SetRenderDistance(int chunksFromPlayer) { renderDistance = chunksFromPlayer; }
+	void SetSeed(unsigned int seed) { worldSeed = seed; }
+
+	void SetTerrainParams(int base, int hill, BlockType surface, BlockType underground) {
+		baseHeight = base;
+		maxHillHeight = hill;
+		surfaceType = surface;
+		undergroundType = underground;
+	}
+
+	// Kept for compatibility with older grid code. The chunked terrain no
+	// longer has one fixed width/height/origin.
 	void SetSize(int, int) {}
 	void SetOrigin(float, float) {}
 	void SetMaxRenderDistance(float) {}
 
 	void GenerateFlat(BlockType type) {
-		surfaceType = type; undergroundType = type;
-		baseHeight = 1; maxHillHeight = 0;
+		surfaceType = type;
+		undergroundType = type;
+		baseHeight = 1;
+		maxHillHeight = 0;
 	}
-	void GenerateHillyTerrain(int base, int hill, BlockType surface, BlockType underground,
+
+	void GenerateHillyTerrain(int base,
+							  int hill,
+							  BlockType surface,
+							  BlockType underground,
 							  unsigned int seed = std::random_device{}()) {
-		worldSeed = seed; baseHeight = base; maxHillHeight = hill;
-		surfaceType = surface; undergroundType = underground;
+		worldSeed = seed;
+		baseHeight = base;
+		maxHillHeight = hill;
+		surfaceType = surface;
+		undergroundType = underground;
 	}
+
+	void SetCameraObject(Object* camera) {
+		cameraObj = camera;
+	}
+
+	// ---------------------------------------------------------------------
+	// Coordinate conversion
+	// ---------------------------------------------------------------------
 
 	bool WorldToGrid(const Vector3& world, int& gx, int& gy, int& gz) const {
 		gx = (int)std::floor(world.x / blockSize + 0.5f);
-		gz = (int)std::floor(world.z / blockSize + 0.5f);
 		gy = (int)std::floor(world.y / blockSize + 0.5f);
+		gz = (int)std::floor(world.z / blockSize + 0.5f);
 		return gy >= 0;
 	}
+
 	Vector3 GridToWorld(int gx, int gy, int gz) const {
 		return Vector3(gx * blockSize, gy * blockSize, gz * blockSize);
 	}
 
-
-	bool HasBlock(int gx, int gy, int gz) const {
-		int cx, cz, lx, lz;
-		globalToChunk(gx, gz, cx, cz, lx, lz);
-		auto it = chunks.find({cx, cz});
-		if (it == chunks.end() || !it->second->generated) return false;
-		return it->second->blocks.count(Chunk::packLocal(lx, gy, lz)) > 0;
+	float GetSpawnHeight(int gx, int gz) const {
+		return (getTerrainHeight(gx, gz) + 1) * blockSize;
 	}
 
+	// ---------------------------------------------------------------------
+	// Block access
+	// ---------------------------------------------------------------------
+
+	bool HasBlock(int gx, int gy, int gz) const {
+		const Chunk* chunk = findGeneratedChunkForBlock(gx, gz);
+		if (!chunk) return false;
+
+		int lx, lz;
+		worldToLocalBlock(gx, gz, lx, lz);
+		return chunk->blocks.count(Chunk::PackLocal(lx, gy, lz)) > 0;
+	}
 
 	Object* GetBlock(int gx, int gy, int gz) const {
+		// The old API returned Object*. Blocks are now stored as data, so callers
+		// only use this as a yes/no value.
 		return HasBlock(gx, gy, gz) ? reinterpret_cast<Object*>(1) : nullptr;
 	}
 
 	BlockType GetBlockType(int gx, int gy, int gz) const {
 		int cx, cz, lx, lz;
 		globalToChunk(gx, gz, cx, cz, lx, lz);
-		auto it = chunks.find({cx, cz});
-		if (it == chunks.end()) return BlockType::Dirt;
-		auto bit = it->second->blocks.find(Chunk::packLocal(lx, gy, lz));
-		return (bit != it->second->blocks.end()) ? bit->second : BlockType::Dirt;
+
+		auto chunkIt = chunks.find({cx, cz});
+		if (chunkIt == chunks.end()) return BlockType::Dirt;
+
+		auto blockIt = chunkIt->second->blocks.find(Chunk::PackLocal(lx, gy, lz));
+		return (blockIt != chunkIt->second->blocks.end()) ? blockIt->second : BlockType::Dirt;
 	}
 
 	Object* CreateBlockAt(int gx, int gy, int gz, BlockType type) {
 		if (gy < 0 || HasBlock(gx, gy, gz)) return nullptr;
+
 		int cx, cz, lx, lz;
 		globalToChunk(gx, gz, cx, cz, lx, lz);
+
 		Chunk* chunk = getOrCreateChunk(cx, cz);
-		chunk->blocks[Chunk::packLocal(lx, gy, lz)] = type;
-		chunk->meshDirty = true;
-		markNeighborChunksDirty(gx, gz);
+		chunk->blocks[Chunk::PackLocal(lx, gy, lz)] = type;
+		markChunkAndBorderDirty(chunk, gx, gz);
+
 		return reinterpret_cast<Object*>(1);
 	}
 
 	void RemoveBlockAt(int gx, int gy, int gz) {
 		int cx, cz, lx, lz;
 		globalToChunk(gx, gz, cx, cz, lx, lz);
-		auto it = chunks.find({cx, cz});
-		if (it == chunks.end()) return;
-		int key = Chunk::packLocal(lx, gy, lz);
-		if (it->second->blocks.erase(key)) {
-			it->second->meshDirty = true;
-			markNeighborChunksDirty(gx, gz);
+
+		auto chunkIt = chunks.find({cx, cz});
+		if (chunkIt == chunks.end()) return;
+
+		int key = Chunk::PackLocal(lx, gy, lz);
+		if (chunkIt->second->blocks.erase(key) > 0) {
+			markChunkAndBorderDirty(chunkIt->second, gx, gz);
 		}
 	}
 
@@ -166,42 +221,101 @@ public:
 	Object* CreateBlockAt(int gx, int gz, BlockType type) { return CreateBlockAt(gx, 0, gz, type); }
 	void RemoveBlockAt(int gx, int gz) { RemoveBlockAt(gx, 0, gz); }
 
-	void SetCameraObject(Object* cam) { cameraObj = cam; }
-
-	float GetSpawnHeight(int gx, int gz) const {
-		int h = getTerrainHeight(gx, gz);
-		return (h + 1) * blockSize;
-	}
-
+	// Used by scene setup to make sure the starting area exists before the
+	// player begins moving.
 	void ForceGenerateArea(int gx, int gz, int radiusChunks = 1) {
-		int cx, cz, lx, lz;
-		globalToChunk(gx, gz, cx, cz, lx, lz);
-		for (int dz = -radiusChunks; dz <= radiusChunks; ++dz)
-			for (int dx = -radiusChunks; dx <= radiusChunks; ++dx)
-				generateChunk(cx + dx, cz + dz);
-		for (int dz = -radiusChunks; dz <= radiusChunks; ++dz)
+		int centerCx, centerCz, lx, lz;
+		globalToChunk(gx, gz, centerCx, centerCz, lx, lz);
+
+		for (int dz = -radiusChunks; dz <= radiusChunks; ++dz) {
 			for (int dx = -radiusChunks; dx <= radiusChunks; ++dx) {
-				auto it = chunks.find({cx + dx, cz + dz});
-				if (it != chunks.end() && it->second->meshDirty)
-					buildChunkMesh(it->second);
+				generateChunk(centerCx + dx, centerCz + dz);
 			}
+		}
+
+		for (int dz = -radiusChunks; dz <= radiusChunks; ++dz) {
+			for (int dx = -radiusChunks; dx <= radiusChunks; ++dx) {
+				Chunk* chunk = findChunk(centerCx + dx, centerCz + dz);
+				if (chunk && chunk->meshDirty) {
+					buildChunkMesh(chunk);
+				}
+			}
+		}
 	}
 
 	void SetHighlightBlock(int gx, int gy, int gz) {
-		VoxelRenderer::Get().SetHighlight(glm::vec3(gx * blockSize, gy * blockSize, gz * blockSize), true, blockSize * 0.5f);
+		glm::vec3 worldPos(gx * blockSize, gy * blockSize, gz * blockSize);
+		VoxelRenderer::Get().SetHighlight(worldPos, true, blockSize * 0.5f);
 	}
-	void ClearHighlight() { 
+
+	void ClearHighlight() {
 		VoxelRenderer::Get().SetHighlight(glm::vec3(0.0f), false, blockSize * 0.5f);
 	}
 
 private:
+	static constexpr int CHUNKS_GENERATED_PER_FRAME = 8;
+	static constexpr int CHUNK_MESHES_REBUILT_PER_FRAME = 8;
+	static constexpr int CHUNK_UNLOAD_MARGIN = 2;
+	static constexpr int ASSUMED_MAX_CHUNK_HEIGHT = 64;
+	static constexpr int FLOATS_PER_VERTEX = 8;
+
+	enum FaceDirection {
+		FacePositiveX = 0,
+		FaceNegativeX = 1,
+		FacePositiveY = 2,
+		FaceNegativeY = 3,
+		FacePositiveZ = 4,
+		FaceNegativeZ = 5
+	};
+
+	// ---------------------------------------------------------------------
+	// Chunk coordinates
+	// ---------------------------------------------------------------------
 
 	static void globalToChunk(int gx, int gz, int& cx, int& cz, int& lx, int& lz) {
-		cx = (gx >= 0) ? (gx / CHUNK_SIZE) : ((gx - CHUNK_SIZE + 1) / CHUNK_SIZE);
-		cz = (gz >= 0) ? (gz / CHUNK_SIZE) : ((gz - CHUNK_SIZE + 1) / CHUNK_SIZE);
+		cx = floorDiv(gx, CHUNK_SIZE);
+		cz = floorDiv(gz, CHUNK_SIZE);
 		lx = gx - cx * CHUNK_SIZE;
 		lz = gz - cz * CHUNK_SIZE;
 	}
+
+	static int floorDiv(int value, int divisor) {
+		return (value >= 0) ? (value / divisor) : ((value - divisor + 1) / divisor);
+	}
+
+	static void worldToLocalBlock(int gx, int gz, int& lx, int& lz) {
+		int cx, cz;
+		globalToChunk(gx, gz, cx, cz, lx, lz);
+	}
+
+	Chunk* findChunk(int cx, int cz) {
+		auto it = chunks.find({cx, cz});
+		return (it != chunks.end()) ? it->second : nullptr;
+	}
+
+	const Chunk* findGeneratedChunkForBlock(int gx, int gz) const {
+		int cx, cz, lx, lz;
+		globalToChunk(gx, gz, cx, cz, lx, lz);
+
+		auto it = chunks.find({cx, cz});
+		if (it == chunks.end() || !it->second->generated) return nullptr;
+		return it->second;
+	}
+
+	Chunk* getOrCreateChunk(int cx, int cz) {
+		ChunkCoord coord{cx, cz};
+		auto it = chunks.find(coord);
+		if (it != chunks.end()) return it->second;
+
+		Chunk* chunk = new Chunk();
+		chunk->coord = coord;
+		chunks[coord] = chunk;
+		return chunk;
+	}
+
+	// ---------------------------------------------------------------------
+	// Terrain height
+	// ---------------------------------------------------------------------
 
 	static float hashNoise(int x, int z, unsigned int seed) {
 		unsigned int n = (unsigned int)(x * 73856093) ^ (unsigned int)(z * 19349663) ^ seed;
@@ -209,55 +323,142 @@ private:
 		n = n * (n * n * 15731u + 789221u) + 1376312589u;
 		return (float)(n & 0x7FFFFFFF) / (float)0x7FFFFFFF;
 	}
+
 	static float sampleNoise(int gx, int gz, int gridStep, unsigned int seed) {
 		float fx = (float)gx / (float)gridStep;
 		float fz = (float)gz / (float)gridStep;
+
 		int ix = (int)std::floor(fx);
 		int iz = (int)std::floor(fz);
-		float tx = fx - (float)ix;
-		float tz = fz - (float)iz;
-		tx = tx * tx * (3.0f - 2.0f * tx);
-		tz = tz * tz * (3.0f - 2.0f * tz);
+
+		float tx = smoothStep(fx - (float)ix);
+		float tz = smoothStep(fz - (float)iz);
+
 		float v00 = hashNoise(ix,     iz,     seed);
 		float v10 = hashNoise(ix + 1, iz,     seed);
 		float v01 = hashNoise(ix,     iz + 1, seed);
 		float v11 = hashNoise(ix + 1, iz + 1, seed);
-		return v00*(1-tx)*(1-tz) + v10*tx*(1-tz) + v01*(1-tx)*tz + v11*tx*tz;
+
+		float top = lerp(v00, v10, tx);
+		float bottom = lerp(v01, v11, tx);
+		return lerp(top, bottom, tz);
 	}
+
+	static float smoothStep(float t) {
+		return t * t * (3.0f - 2.0f * t);
+	}
+
+	static float lerp(float a, float b, float t) {
+		return a + (b - a) * t;
+	}
+
 	int getTerrainHeight(int gx, int gz) const {
-		float v1 = sampleNoise(gx, gz, 8, worldSeed);
-		float v2 = sampleNoise(gx, gz, 4, worldSeed * 2u + 137u);
-		float v3 = sampleNoise(gx, gz, 2, worldSeed * 3u + 5449u);
-		float combined = v1 * 0.6f + v2 * 0.25f + v3 * 0.15f;
+		float largeHills = sampleNoise(gx, gz, 8, worldSeed);
+		float mediumHills = sampleNoise(gx, gz, 4, worldSeed * 2u + 137u);
+		float smallVariation = sampleNoise(gx, gz, 2, worldSeed * 3u + 5449u);
+
+		float combined = largeHills * 0.6f + mediumHills * 0.25f + smallVariation * 0.15f;
 		return std::max(1, baseHeight + (int)(combined * maxHillHeight));
 	}
 
-	Chunk* getOrCreateChunk(int cx, int cz) {
-		ChunkCoord cc{cx, cz};
-		auto it = chunks.find(cc);
-		if (it != chunks.end()) return it->second;
-		Chunk* c = new Chunk();
-		c->coord = cc;
-		chunks[cc] = c;
-		return c;
+	// ---------------------------------------------------------------------
+	// Chunk lifetime and streaming
+	// ---------------------------------------------------------------------
+
+	void updateChunksAroundPlayer() {
+		if (!object || !object->GetScene()) return;
+
+		Vector3 cameraPosition = getCameraPosition();
+
+		int gx, gy, gz;
+		WorldToGrid(cameraPosition, gx, gy, gz);
+
+		int playerCx, playerCz, lx, lz;
+		globalToChunk(gx, gz, playerCx, playerCz, lx, lz);
+
+		if (playerCx == lastPlayerCx && playerCz == lastPlayerCz) return;
+		lastPlayerCx = playerCx;
+		lastPlayerCz = playerCz;
+
+		queueChunksAround(playerCx, playerCz);
+		unloadDistantChunks(playerCx, playerCz);
+	}
+
+	Vector3 getCameraPosition() {
+		if (cameraObj) {
+			return cameraObj->GetPosition3D();
+		}
+
+		const auto& objects = object->GetScene()->GetObjects();
+		for (auto* sceneObject : objects) {
+			if (!sceneObject) continue;
+
+			auto* camera = sceneObject->GetComponent<CameraComponent>();
+			if (camera) {
+				cameraObj = sceneObject;
+				return sceneObject->GetPosition3D();
+			}
+		}
+
+		return Vector3(0, 0, 0);
+	}
+
+	void queueChunksAround(int centerCx, int centerCz) {
+		for (int dz = -renderDistance; dz <= renderDistance; ++dz) {
+			for (int dx = -renderDistance; dx <= renderDistance; ++dx) {
+				int cx = centerCx + dx;
+				int cz = centerCz + dz;
+
+				Chunk* chunk = findChunk(cx, cz);
+				if (!chunk || !chunk->generated) {
+					enqueueChunk(cx, cz);
+				}
+			}
+		}
+	}
+
+	void unloadDistantChunks(int centerCx, int centerCz) {
+		int unloadDistance = renderDistance + CHUNK_UNLOAD_MARGIN;
+		std::vector<ChunkCoord> chunksToUnload;
+
+		for (const auto& pair : chunks) {
+			int dx = pair.first.cx - centerCx;
+			int dz = pair.first.cz - centerCz;
+
+			if (std::abs(dx) > unloadDistance || std::abs(dz) > unloadDistance) {
+				chunksToUnload.push_back(pair.first);
+			}
+		}
+
+		for (const auto& coord : chunksToUnload) {
+			unloadChunk(coord.cx, coord.cz);
+		}
 	}
 
 	void enqueueChunk(int cx, int cz) {
-		ChunkCoord cc{cx, cz};
-		auto it = chunks.find(cc);
-		if (it != chunks.end() && it->second->generated) return;
-		for (const auto& q : generateQueue) if (q == cc) return;
-		generateQueue.push_back(cc);
+		ChunkCoord coord{cx, cz};
+
+		Chunk* chunk = findChunk(cx, cz);
+		if (chunk && chunk->generated) return;
+
+		for (const auto& queuedCoord : generateQueue) {
+			if (queuedCoord == coord) return;
+		}
+
+		generateQueue.push_back(coord);
 	}
 
 	void processGenerationQueue() {
 		if (!object || !object->GetScene()) return;
-		for (int i = 0; i < CHUNKS_PER_FRAME && !generateQueue.empty(); ++i) {
-			ChunkCoord cc = generateQueue.front();
+
+		for (int i = 0; i < CHUNKS_GENERATED_PER_FRAME && !generateQueue.empty(); ++i) {
+			ChunkCoord coord = generateQueue.front();
 			generateQueue.pop_front();
-			auto it = chunks.find(cc);
-			if (it != chunks.end() && it->second->generated) continue;
-			generateChunk(cc.cx, cc.cz);
+
+			Chunk* chunk = findChunk(coord.cx, coord.cz);
+			if (chunk && chunk->generated) continue;
+
+			generateChunk(coord.cx, coord.cz);
 		}
 	}
 
@@ -273,224 +474,304 @@ private:
 				int gx = startGx + lx;
 				int gz = startGz + lz;
 				int height = getTerrainHeight(gx, gz);
+
 				for (int gy = 0; gy < height; ++gy) {
-					BlockType bt = (gy == height - 1) ? surfaceType : undergroundType;
-					chunk->blocks[Chunk::packLocal(lx, gy, lz)] = bt;
+					BlockType type = (gy == height - 1) ? surfaceType : undergroundType;
+					chunk->blocks[Chunk::PackLocal(lx, gy, lz)] = type;
 				}
 			}
 		}
+
 		chunk->generated = true;
 		chunk->meshDirty = true;
-
-		// Adjacent chunks may need border faces updated
-		static const int ddx[] = {-1, 1, 0, 0};
-		static const int ddz[] = {0, 0, -1, 1};
-		for (int i = 0; i < 4; ++i) {
-			auto it = chunks.find({cx + ddx[i], cz + ddz[i]});
-			if (it != chunks.end() && it->second->generated)
-				it->second->meshDirty = true;
-		}
+		markGeneratedNeighborsDirty(cx, cz);
 	}
 
 	void unloadChunk(int cx, int cz) {
-		ChunkCoord cc{cx, cz};
+		ChunkCoord coord{cx, cz};
+
 		generateQueue.erase(
 			std::remove_if(generateQueue.begin(), generateQueue.end(),
-				[&](const ChunkCoord& c){ return c == cc; }),
+				[&](const ChunkCoord& queuedCoord) { return queuedCoord == coord; }),
 			generateQueue.end());
-		auto it = chunks.find(cc);
-		if (it == chunks.end()) return;
+
+		auto chunkIt = chunks.find(coord);
+		if (chunkIt == chunks.end()) return;
+
 		VoxelRenderer::Get().RemoveChunk(cx, cz);
-		delete it->second;
-		chunks.erase(it);
+		delete chunkIt->second;
+		chunks.erase(chunkIt);
 	}
+
+	void markGeneratedNeighborsDirty(int cx, int cz) {
+		static const int neighborDx[] = {-1, 1, 0, 0};
+		static const int neighborDz[] = {0, 0, -1, 1};
+
+		for (int i = 0; i < 4; ++i) {
+			Chunk* neighbor = findChunk(cx + neighborDx[i], cz + neighborDz[i]);
+			if (neighbor && neighbor->generated) {
+				neighbor->meshDirty = true;
+			}
+		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Mesh rebuild
+	// ---------------------------------------------------------------------
 
 	void rebuildDirtyMeshes() {
 		int rebuilt = 0;
-		for (auto& [cc, chunk] : chunks) {
-			if (chunk->generated && chunk->meshDirty) {
-				buildChunkMesh(chunk);
-				if (++rebuilt >= 8) break;
-			}
+
+		for (auto& pair : chunks) {
+			Chunk* chunk = pair.second;
+			if (!chunk->generated || !chunk->meshDirty) continue;
+
+			buildChunkMesh(chunk);
+			if (++rebuilt >= CHUNK_MESHES_REBUILT_PER_FRAME) break;
 		}
 	}
-
-	void markNeighborChunksDirty(int gx, int gz) {
-		int cx, cz, lx, lz;
-		globalToChunk(gx, gz, cx, cz, lx, lz);
-		if (lx == 0)              { auto it = chunks.find({cx-1, cz}); if (it != chunks.end()) it->second->meshDirty = true; }
-		if (lx == CHUNK_SIZE - 1) { auto it = chunks.find({cx+1, cz}); if (it != chunks.end()) it->second->meshDirty = true; }
-		if (lz == 0)              { auto it = chunks.find({cx, cz-1}); if (it != chunks.end()) it->second->meshDirty = true; }
-		if (lz == CHUNK_SIZE - 1) { auto it = chunks.find({cx, cz+1}); if (it != chunks.end()) it->second->meshDirty = true; }
-	}
-
-	void updateChunksAroundPlayer() {
-		if (!object || !object->GetScene()) return;
-		Vector3 camPos(0, 0, 0);
-		if (cameraObj) {
-			camPos = cameraObj->GetPosition3D();
-		} else {
-			const auto& objects = object->GetScene()->GetObjects();
-			for (auto* obj : objects) {
-				if (!obj) continue;
-				auto* cam = obj->GetComponent<CameraComponent>();
-				if (cam) { camPos = obj->GetPosition3D(); cameraObj = obj; break; }
-			}
-		}
-		int gx, gy, gz;
-		WorldToGrid(camPos, gx, gy, gz);
-		int cx, cz, lx, lz;
-		globalToChunk(gx, gz, cx, cz, lx, lz);
-		if (cx == lastPlayerCx && cz == lastPlayerCz) return;
-		lastPlayerCx = cx; lastPlayerCz = cz;
-		for (int dz = -renderDistance; dz <= renderDistance; ++dz)
-			for (int dx = -renderDistance; dx <= renderDistance; ++dx) {
-				auto it = chunks.find({cx + dx, cz + dz});
-				if (it == chunks.end() || !it->second->generated)
-					enqueueChunk(cx + dx, cz + dz);
-			}
-		int unloadDist = renderDistance + 2;
-		std::vector<ChunkCoord> toUnload;
-		for (auto& kv : chunks) {
-			int ddx = kv.first.cx - cx, ddz = kv.first.cz - cz;
-			if (std::abs(ddx) > unloadDist || std::abs(ddz) > unloadDist)
-				toUnload.push_back(kv.first);
-		}
-		for (auto& cc : toUnload) unloadChunk(cc.cx, cc.cz);
-	}
-
-	//  Only exposed faces (neighbour is air) are emitted.
-	//  Faces are grouped by block type so each group uses one texture.
 
 	void buildChunkMesh(Chunk* chunk) {
-		if (chunk->blocks.empty()) { 
-			chunk->meshDirty = false; 
+		if (chunk->blocks.empty()) {
+			chunk->meshDirty = false;
 			VoxelRenderer::Get().RemoveChunk(chunk->coord.cx, chunk->coord.cz);
-			return; 
+			return;
 		}
 
-		std::unordered_map<int, std::vector<float>>        vertsByType;
-		std::unordered_map<int, std::vector<unsigned int>>  indsByType;
+		std::unordered_map<int, std::vector<float>> verticesByType;
+		std::unordered_map<int, std::vector<unsigned int>> indicesByType;
 
-		for (auto& [key, type] : chunk->blocks) {
-			int lx, ly, lz;
-			Chunk::unpackLocal(key, lx, ly, lz);
-			int gx = chunk->coord.cx * CHUNK_SIZE + lx;
-			int gz = chunk->coord.cz * CHUNK_SIZE + lz;
-
-			float wx = gx * blockSize;
-			float wy = ly * blockSize;
-			float wz = gz * blockSize;
-			float h  = blockSize * 0.5f;
-			int t = (int)type;
-
-			if (!hasBlockAt(gx+1, ly, gz)) appendFace(vertsByType[t], indsByType[t], wx, wy, wz, h, 0);
-			if (!hasBlockAt(gx-1, ly, gz)) appendFace(vertsByType[t], indsByType[t], wx, wy, wz, h, 1);
-			if (!hasBlockAt(gx, ly+1, gz)) appendFace(vertsByType[t], indsByType[t], wx, wy, wz, h, 2);
-			if (ly == 0 || !hasBlockAt(gx, ly-1, gz)) appendFace(vertsByType[t], indsByType[t], wx, wy, wz, h, 3);
-			if (!hasBlockAt(gx, ly, gz+1)) appendFace(vertsByType[t], indsByType[t], wx, wy, wz, h, 4);
-			if (!hasBlockAt(gx, ly, gz-1)) appendFace(vertsByType[t], indsByType[t], wx, wy, wz, h, 5);
+		for (const auto& block : chunk->blocks) {
+			appendVisibleFacesForBlock(chunk, block.first, block.second, verticesByType, indicesByType);
 		}
 
-		std::vector<VoxelMeshData> meshes;
-		for (auto& [typeInt, verts] : vertsByType) {
-			auto& inds = indsByType[typeInt];
-			if (inds.empty()) continue;
+		std::vector<VoxelMeshData> meshes = buildRendererMeshes(verticesByType, indicesByType);
+		VoxelRenderer::Get().UpdateChunk(
+			chunk->coord.cx,
+			chunk->coord.cz,
+			getChunkAabbMin(chunk),
+			getChunkAabbMax(chunk),
+			meshes);
 
-			VoxelMeshData md;
-			md.textureId = getTextureForType((BlockType)typeInt);
-			md.vertices = std::move(verts);
-			md.indices = std::move(inds);
-			meshes.push_back(std::move(md));
-		}
-
-		const float chunkMaxY = 64.0f * blockSize;
-		glm::vec3 aabbMin(chunk->coord.cx * CHUNK_SIZE * blockSize, 0.0f, chunk->coord.cz * CHUNK_SIZE * blockSize);
-		glm::vec3 aabbMax((chunk->coord.cx + 1) * CHUNK_SIZE * blockSize, chunkMaxY, (chunk->coord.cz + 1) * CHUNK_SIZE * blockSize);
-
-		VoxelRenderer::Get().UpdateChunk(chunk->coord.cx, chunk->coord.cz, aabbMin, aabbMax, meshes);
 		chunk->meshDirty = false;
+	}
+
+	void appendVisibleFacesForBlock(Chunk* chunk,
+									int packedBlockKey,
+									BlockType type,
+									std::unordered_map<int, std::vector<float>>& verticesByType,
+									std::unordered_map<int, std::vector<unsigned int>>& indicesByType) {
+		int lx, ly, lz;
+		Chunk::UnpackLocal(packedBlockKey, lx, ly, lz);
+
+		int gx = chunk->coord.cx * CHUNK_SIZE + lx;
+		int gz = chunk->coord.cz * CHUNK_SIZE + lz;
+
+		float wx = gx * blockSize;
+		float wy = ly * blockSize;
+		float wz = gz * blockSize;
+		float halfSize = blockSize * 0.5f;
+		int typeKey = (int)type;
+
+		auto& vertices = verticesByType[typeKey];
+		auto& indices = indicesByType[typeKey];
+
+		if (!hasBlockAt(gx + 1, ly, gz)) appendFace(vertices, indices, wx, wy, wz, halfSize, FacePositiveX);
+		if (!hasBlockAt(gx - 1, ly, gz)) appendFace(vertices, indices, wx, wy, wz, halfSize, FaceNegativeX);
+		if (!hasBlockAt(gx, ly + 1, gz)) appendFace(vertices, indices, wx, wy, wz, halfSize, FacePositiveY);
+		if (ly == 0 || !hasBlockAt(gx, ly - 1, gz)) appendFace(vertices, indices, wx, wy, wz, halfSize, FaceNegativeY);
+		if (!hasBlockAt(gx, ly, gz + 1)) appendFace(vertices, indices, wx, wy, wz, halfSize, FacePositiveZ);
+		if (!hasBlockAt(gx, ly, gz - 1)) appendFace(vertices, indices, wx, wy, wz, halfSize, FaceNegativeZ);
+	}
+
+	std::vector<VoxelMeshData> buildRendererMeshes(
+		std::unordered_map<int, std::vector<float>>& verticesByType,
+		std::unordered_map<int, std::vector<unsigned int>>& indicesByType) const {
+		std::vector<VoxelMeshData> meshes;
+
+		for (auto& pair : verticesByType) {
+			int typeKey = pair.first;
+			auto& vertices = pair.second;
+			auto& indices = indicesByType[typeKey];
+			if (indices.empty()) continue;
+
+			VoxelMeshData mesh;
+			mesh.textureId = getTextureForType((BlockType)typeKey);
+			mesh.vertices = std::move(vertices);
+			mesh.indices = std::move(indices);
+			meshes.push_back(std::move(mesh));
+		}
+
+		return meshes;
 	}
 
 	bool hasBlockAt(int gx, int gy, int gz) const {
 		if (gy < 0) return true;
+
+		const Chunk* chunk = findGeneratedChunkForBlock(gx, gz);
+		if (!chunk) return false;
+
+		int lx, lz;
+		worldToLocalBlock(gx, gz, lx, lz);
+		return chunk->blocks.count(Chunk::PackLocal(lx, gy, lz)) > 0;
+	}
+
+	void markChunkAndBorderDirty(Chunk* chunk, int gx, int gz) {
+		chunk->meshDirty = true;
+		markBorderNeighborsDirty(gx, gz);
+	}
+
+	void markBorderNeighborsDirty(int gx, int gz) {
 		int cx, cz, lx, lz;
 		globalToChunk(gx, gz, cx, cz, lx, lz);
-		auto it = chunks.find({cx, cz});
-		if (it == chunks.end() || !it->second->generated) return false;
-		return it->second->blocks.count(Chunk::packLocal(lx, gy, lz)) > 0;
+
+		if (lx == 0) markChunkDirty(cx - 1, cz);
+		if (lx == CHUNK_SIZE - 1) markChunkDirty(cx + 1, cz);
+		if (lz == 0) markChunkDirty(cx, cz - 1);
+		if (lz == CHUNK_SIZE - 1) markChunkDirty(cx, cz + 1);
 	}
 
-	// Vertex layout: pos(3) + normal(3) + uv(2) = 8 floats
-	// Winding: CCW from outside (matches GL_CULL_FACE GL_BACK GL_CCW)
-
-	static void appendFace(std::vector<float>& verts, std::vector<unsigned int>& inds,
-	                        float cx, float cy, float cz, float h, int face)
-	{
-		unsigned int base = (unsigned int)(verts.size() / 8);
-		float v[4][8];
-		switch (face) {
-		case 0: // +X
-			v[0][0]=cx+h; v[0][1]=cy-h; v[0][2]=cz-h; v[0][3]= 1; v[0][4]=0; v[0][5]=0; v[0][6]=0; v[0][7]=0;
-			v[1][0]=cx+h; v[1][1]=cy+h; v[1][2]=cz-h; v[1][3]= 1; v[1][4]=0; v[1][5]=0; v[1][6]=0; v[1][7]=1;
-			v[2][0]=cx+h; v[2][1]=cy+h; v[2][2]=cz+h; v[2][3]= 1; v[2][4]=0; v[2][5]=0; v[2][6]=1; v[2][7]=1;
-			v[3][0]=cx+h; v[3][1]=cy-h; v[3][2]=cz+h; v[3][3]= 1; v[3][4]=0; v[3][5]=0; v[3][6]=1; v[3][7]=0;
-			break;
-		case 1: // -X
-			v[0][0]=cx-h; v[0][1]=cy-h; v[0][2]=cz+h; v[0][3]=-1; v[0][4]=0; v[0][5]=0; v[0][6]=0; v[0][7]=0;
-			v[1][0]=cx-h; v[1][1]=cy+h; v[1][2]=cz+h; v[1][3]=-1; v[1][4]=0; v[1][5]=0; v[1][6]=0; v[1][7]=1;
-			v[2][0]=cx-h; v[2][1]=cy+h; v[2][2]=cz-h; v[2][3]=-1; v[2][4]=0; v[2][5]=0; v[2][6]=1; v[2][7]=1;
-			v[3][0]=cx-h; v[3][1]=cy-h; v[3][2]=cz-h; v[3][3]=-1; v[3][4]=0; v[3][5]=0; v[3][6]=1; v[3][7]=0;
-			break;
-		case 2: // +Y
-			v[0][0]=cx-h; v[0][1]=cy+h; v[0][2]=cz-h; v[0][3]=0; v[0][4]= 1; v[0][5]=0; v[0][6]=0; v[0][7]=0;
-			v[1][0]=cx-h; v[1][1]=cy+h; v[1][2]=cz+h; v[1][3]=0; v[1][4]= 1; v[1][5]=0; v[1][6]=0; v[1][7]=1;
-			v[2][0]=cx+h; v[2][1]=cy+h; v[2][2]=cz+h; v[2][3]=0; v[2][4]= 1; v[2][5]=0; v[2][6]=1; v[2][7]=1;
-			v[3][0]=cx+h; v[3][1]=cy+h; v[3][2]=cz-h; v[3][3]=0; v[3][4]= 1; v[3][5]=0; v[3][6]=1; v[3][7]=0;
-			break;
-		case 3: // -Y
-			v[0][0]=cx-h; v[0][1]=cy-h; v[0][2]=cz+h; v[0][3]=0; v[0][4]=-1; v[0][5]=0; v[0][6]=0; v[0][7]=0;
-			v[1][0]=cx-h; v[1][1]=cy-h; v[1][2]=cz-h; v[1][3]=0; v[1][4]=-1; v[1][5]=0; v[1][6]=0; v[1][7]=1;
-			v[2][0]=cx+h; v[2][1]=cy-h; v[2][2]=cz-h; v[2][3]=0; v[2][4]=-1; v[2][5]=0; v[2][6]=1; v[2][7]=1;
-			v[3][0]=cx+h; v[3][1]=cy-h; v[3][2]=cz+h; v[3][3]=0; v[3][4]=-1; v[3][5]=0; v[3][6]=1; v[3][7]=0;
-			break;
-		case 4: // +Z
-			v[0][0]=cx-h; v[0][1]=cy-h; v[0][2]=cz+h; v[0][3]=0; v[0][4]=0; v[0][5]= 1; v[0][6]=0; v[0][7]=0;
-			v[1][0]=cx+h; v[1][1]=cy-h; v[1][2]=cz+h; v[1][3]=0; v[1][4]=0; v[1][5]= 1; v[1][6]=1; v[1][7]=0;
-			v[2][0]=cx+h; v[2][1]=cy+h; v[2][2]=cz+h; v[2][3]=0; v[2][4]=0; v[2][5]= 1; v[2][6]=1; v[2][7]=1;
-			v[3][0]=cx-h; v[3][1]=cy+h; v[3][2]=cz+h; v[3][3]=0; v[3][4]=0; v[3][5]= 1; v[3][6]=0; v[3][7]=1;
-			break;
-		case 5: // -Z
-			v[0][0]=cx+h; v[0][1]=cy-h; v[0][2]=cz-h; v[0][3]=0; v[0][4]=0; v[0][5]=-1; v[0][6]=0; v[0][7]=0;
-			v[1][0]=cx-h; v[1][1]=cy-h; v[1][2]=cz-h; v[1][3]=0; v[1][4]=0; v[1][5]=-1; v[1][6]=1; v[1][7]=0;
-			v[2][0]=cx-h; v[2][1]=cy+h; v[2][2]=cz-h; v[2][3]=0; v[2][4]=0; v[2][5]=-1; v[2][6]=1; v[2][7]=1;
-			v[3][0]=cx+h; v[3][1]=cy+h; v[3][2]=cz-h; v[3][3]=0; v[3][4]=0; v[3][5]=-1; v[3][6]=0; v[3][7]=1;
-			break;
+	void markChunkDirty(int cx, int cz) {
+		Chunk* chunk = findChunk(cx, cz);
+		if (chunk) {
+			chunk->meshDirty = true;
 		}
-		for (int i = 0; i < 4; ++i)
-			for (int j = 0; j < 8; ++j)
-				verts.push_back(v[i][j]);
-		inds.push_back(base);     inds.push_back(base + 1); inds.push_back(base + 2);
-		inds.push_back(base);     inds.push_back(base + 2); inds.push_back(base + 3);
 	}
+
+	glm::vec3 getChunkAabbMin(const Chunk* chunk) const {
+		return glm::vec3(
+			chunk->coord.cx * CHUNK_SIZE * blockSize,
+			0.0f,
+			chunk->coord.cz * CHUNK_SIZE * blockSize);
+	}
+
+	glm::vec3 getChunkAabbMax(const Chunk* chunk) const {
+		return glm::vec3(
+			(chunk->coord.cx + 1) * CHUNK_SIZE * blockSize,
+			ASSUMED_MAX_CHUNK_HEIGHT * blockSize,
+			(chunk->coord.cz + 1) * CHUNK_SIZE * blockSize);
+	}
+
+	// Vertex layout sent to VoxelRenderer:
+	// position.xyz, normal.xyz, uv.xy = 8 floats per vertex.
+	static void appendFace(std::vector<float>& vertices,
+						   std::vector<unsigned int>& indices,
+						   float centerX,
+						   float centerY,
+						   float centerZ,
+						   float halfSize,
+						   FaceDirection face) {
+		unsigned int base = (unsigned int)(vertices.size() / FLOATS_PER_VERTEX);
+		float v[4][FLOATS_PER_VERTEX];
+
+		fillFaceVertices(v, centerX, centerY, centerZ, halfSize, face);
+
+		for (int i = 0; i < 4; ++i) {
+			for (int j = 0; j < FLOATS_PER_VERTEX; ++j) {
+				vertices.push_back(v[i][j]);
+			}
+		}
+
+		indices.push_back(base);
+		indices.push_back(base + 1);
+		indices.push_back(base + 2);
+		indices.push_back(base);
+		indices.push_back(base + 2);
+		indices.push_back(base + 3);
+	}
+
+	static void fillFaceVertices(float v[4][FLOATS_PER_VERTEX],
+								 float centerX,
+								 float centerY,
+								 float centerZ,
+								 float h,
+								 FaceDirection face) {
+		switch (face) {
+			case FacePositiveX:
+				setVertex(v[0], centerX + h, centerY - h, centerZ - h,  1,  0,  0, 0, 0);
+				setVertex(v[1], centerX + h, centerY + h, centerZ - h,  1,  0,  0, 0, 1);
+				setVertex(v[2], centerX + h, centerY + h, centerZ + h,  1,  0,  0, 1, 1);
+				setVertex(v[3], centerX + h, centerY - h, centerZ + h,  1,  0,  0, 1, 0);
+				break;
+
+			case FaceNegativeX:
+				setVertex(v[0], centerX - h, centerY - h, centerZ + h, -1,  0,  0, 0, 0);
+				setVertex(v[1], centerX - h, centerY + h, centerZ + h, -1,  0,  0, 0, 1);
+				setVertex(v[2], centerX - h, centerY + h, centerZ - h, -1,  0,  0, 1, 1);
+				setVertex(v[3], centerX - h, centerY - h, centerZ - h, -1,  0,  0, 1, 0);
+				break;
+
+			case FacePositiveY:
+				setVertex(v[0], centerX - h, centerY + h, centerZ - h,  0,  1,  0, 0, 0);
+				setVertex(v[1], centerX - h, centerY + h, centerZ + h,  0,  1,  0, 0, 1);
+				setVertex(v[2], centerX + h, centerY + h, centerZ + h,  0,  1,  0, 1, 1);
+				setVertex(v[3], centerX + h, centerY + h, centerZ - h,  0,  1,  0, 1, 0);
+				break;
+
+			case FaceNegativeY:
+				setVertex(v[0], centerX - h, centerY - h, centerZ + h,  0, -1,  0, 0, 0);
+				setVertex(v[1], centerX - h, centerY - h, centerZ - h,  0, -1,  0, 0, 1);
+				setVertex(v[2], centerX + h, centerY - h, centerZ - h,  0, -1,  0, 1, 1);
+				setVertex(v[3], centerX + h, centerY - h, centerZ + h,  0, -1,  0, 1, 0);
+				break;
+
+			case FacePositiveZ:
+				setVertex(v[0], centerX - h, centerY - h, centerZ + h,  0,  0,  1, 0, 0);
+				setVertex(v[1], centerX + h, centerY - h, centerZ + h,  0,  0,  1, 1, 0);
+				setVertex(v[2], centerX + h, centerY + h, centerZ + h,  0,  0,  1, 1, 1);
+				setVertex(v[3], centerX - h, centerY + h, centerZ + h,  0,  0,  1, 0, 1);
+				break;
+
+			case FaceNegativeZ:
+				setVertex(v[0], centerX + h, centerY - h, centerZ - h,  0,  0, -1, 0, 0);
+				setVertex(v[1], centerX - h, centerY - h, centerZ - h,  0,  0, -1, 1, 0);
+				setVertex(v[2], centerX - h, centerY + h, centerZ - h,  0,  0, -1, 1, 1);
+				setVertex(v[3], centerX + h, centerY + h, centerZ - h,  0,  0, -1, 0, 1);
+				break;
+		}
+	}
+
+	static void setVertex(float out[FLOATS_PER_VERTEX],
+						  float x,
+						  float y,
+						  float z,
+						  float nx,
+						  float ny,
+						  float nz,
+						  float u,
+						  float v) {
+		out[0] = x;
+		out[1] = y;
+		out[2] = z;
+		out[3] = nx;
+		out[4] = ny;
+		out[5] = nz;
+		out[6] = u;
+		out[7] = v;
+	}
+
+	// ---------------------------------------------------------------------
+	// Textures
+	// ---------------------------------------------------------------------
 
 	void preloadTextures() {
-		auto& rm = ResourceManager::Get();
-		texDirt  = rm.LoadTexture("Assets/block_textures/dirt.png");
-		texStone = rm.LoadTexture("Assets/block_textures/stone.png");
-		texGrass = rm.LoadTexture("Assets/block_textures/grass.png");
-		texSand  = rm.LoadTexture("Assets/block_textures/sand.png");
-		texWood  = rm.LoadTexture("Assets/block_textures/wood.png");
+		auto& resources = ResourceManager::Get();
+		texDirt = resources.LoadTexture("Assets/block_textures/dirt.png");
+		texStone = resources.LoadTexture("Assets/block_textures/stone.png");
+		texGrass = resources.LoadTexture("Assets/block_textures/grass.png");
+		texSand = resources.LoadTexture("Assets/block_textures/sand.png");
+		texWood = resources.LoadTexture("Assets/block_textures/wood.png");
 	}
 
-	GLuint getTextureForType(BlockType t) const {
-		switch (t) {
-			case BlockType::Dirt:  return texDirt;
+	GLuint getTextureForType(BlockType type) const {
+		switch (type) {
+			case BlockType::Dirt: return texDirt;
 			case BlockType::Stone: return texStone;
 			case BlockType::Grass: return texGrass;
-			case BlockType::Sand:  return texSand;
-			case BlockType::Wood:  return texWood;
+			case BlockType::Sand: return texSand;
+			case BlockType::Wood: return texWood;
 		}
+
 		return texDirt;
 	}
 
@@ -498,15 +779,22 @@ private:
 	float blockSize;
 	int renderDistance;
 	unsigned int worldSeed;
-	int baseHeight, maxHillHeight;
-	BlockType surfaceType, undergroundType;
+
+	int baseHeight;
+	int maxHillHeight;
+	BlockType surfaceType;
+	BlockType undergroundType;
 
 	std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> chunks;
 	std::deque<ChunkCoord> generateQueue;
-	static constexpr int CHUNKS_PER_FRAME = 8;
 
 	Object* cameraObj = nullptr;
-	int lastPlayerCx, lastPlayerCz;
+	int lastPlayerCx;
+	int lastPlayerCz;
 
-	GLuint texDirt = 0, texStone = 0, texGrass = 0, texSand = 0, texWood = 0;
+	GLuint texDirt = 0;
+	GLuint texStone = 0;
+	GLuint texGrass = 0;
+	GLuint texSand = 0;
+	GLuint texWood = 0;
 };
