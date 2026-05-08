@@ -52,7 +52,7 @@ private:
     glm::mat4 lightView;
     glm::mat4 lightProj;
 
-    // Camera-centered shadow frustum data
+    // Area used for shadow rendering.
     glm::vec3 shadowCenter = glm::vec3(0.0f);
     float shadowRangeSq = 625.0f;
 };

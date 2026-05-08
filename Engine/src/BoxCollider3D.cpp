@@ -20,11 +20,9 @@ void BoxCollider3D::AutoFitFromModel()
     bool hasModel = (model != nullptr);
     bool hasAabb = hasModel ? model->HasAabb() : false;
     bool rel = hasModel ? model->GetSizeIsRelative() : false;
-    float importX = 0, importY = 0, importZ = 0;
 
     if (hasModel && hasAabb) {
         glm::vec3 importDims = model->GetModelDims();
-        importX = importDims.x; importY = importDims.y; importZ = importDims.z;
         if (rel) {
             float rx = (size.x == 0.0f) ? 1.0f : size.x;
             float ry = (size.y == 0.0f) ? 1.0f : size.y;
@@ -43,7 +41,6 @@ void BoxCollider3D::AutoFitFromModel()
                            size.z != 0.0f ? size.z : 1.0f);
     }
 
-    // Take half-extents
     halfExtents = dimsUsed * 0.5f;
 }
 

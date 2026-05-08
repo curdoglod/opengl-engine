@@ -15,13 +15,10 @@ public:
 
     void Run();
 
-    /// Replace the entire scene stack with `newScene`  (old behaviour).
     void ChangeScene(Scene* newScene);
 
-    /// Push a scene on top of the stack (previous scene stays alive).
     void PushScene(Scene* scene);
 
-    /// Pop the top scene and resume the one below.
     void PopScene();
 
     static ArchiveUnpacker* GetDefaultArchive();
@@ -41,4 +38,3 @@ private:
 };
 
 #endif // ENGINE_H
-

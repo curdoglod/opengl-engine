@@ -44,11 +44,9 @@ public:
     virtual void onKeyPressed(SDL_Keycode key) {}
     virtual void onKeyReleased(SDL_Keycode key) {}
 
-    // Expose read-only view of objects for systems like CameraComponent
     const std::vector<Object*>& GetObjects() const { return objects; }
 
 private:
-    /// Check every pair of BoxCollider3D owners and fire callbacks.
     void dispatchCollisions();
 
 private: 
@@ -60,5 +58,4 @@ private:
 };
 
 #endif // SCENE_H
-
 

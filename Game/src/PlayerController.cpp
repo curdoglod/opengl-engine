@@ -49,20 +49,17 @@ void PlayerController::Update(float dt)
             move.x /= len;
             move.z /= len;
 
-            // Try X and Z movement separately so the player can slide
-            // along walls instead of getting stuck completely.
+            // Move per-axis so walls still allow sliding.
             float dx = move.x * moveSpeed * dt;
             float dz = move.z * moveSpeed * dt;
 
             if (grid)
             {
-                // Try moving along X
                 Vector3 testX(pos.x + dx, pos.y, pos.z);
                 if (!isCollidingHorizontally(grid, testX))
                 {
                     pos.x += dx;
                 }
-                // Try moving along Z
                 Vector3 testZ(pos.x, pos.y, pos.z + dz);
                 if (!isCollidingHorizontally(grid, testZ))
                 {
@@ -110,7 +107,6 @@ void PlayerController::Update(float dt)
             isGrounded = false;
         }
 
-        // Stop upward velocity if the head collides with a block.
         float headY = pos.y + eyeHeight;
         int gx, gy, gz;
         if (grid->WorldToGrid(Vector3(pos.x, headY, pos.z), gx, gy, gz))
@@ -150,7 +146,6 @@ void PlayerController::OnMouseButtonDown(Vector2)
     if (!grid)
         return;
 
-    // Force immediate raycast refresh so click uses current crosshair target.
     hoverRayTimer = kHoverRayInterval;
     updateHoveredBlock(grid, 0.0f);
 
@@ -170,7 +165,7 @@ void PlayerController::OnMouseButtonDown(Vector2)
         if (rayHasEmpty && hotbar)
         {
             grid->CreateBlockAt(rayEmptyGx, rayEmptyGy, rayEmptyGz, hotbar->GetSelectedSlot());
-            rayHitValid = false; // invalidate cache
+            rayHitValid = false;
         }
     }
 }

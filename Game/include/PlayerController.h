@@ -138,22 +138,17 @@ private:
 				return blockWorld.y + grid->GetBlockSize() * 0.5f;
 			}
 		}
-		return 0.0f; // no ground found — fall to Y=0
+		return 0.0f;
 	}
 
-	/// Check whether the player body (a thin vertical column) overlaps any
-	/// solid block at the given position.  We check at feet level and at
-	/// mid-body level so the player cannot walk through one-block-high walls
-	/// or two-block-high walls.
+	// Thin body check against nearby blocks.
 	bool isCollidingHorizontally(WorldGridComponent *grid, const Vector3 &pos) const
 	{
 		float bs = grid->GetBlockSize();
-		float halfBody = bs * 0.3f; // player body half-width (~60% of a block)
+		float halfBody = bs * 0.3f;
 
-		// Heights to test: feet + small offset, and mid-body
 		float testHeights[] = {pos.y + 1.0f, pos.y + eyeHeight * 0.5f};
 
-		// Test four horizontal offsets (approximate the body as a small square)
 		float offsets[][2] = {
 			{halfBody, 0.0f},
 			{-halfBody, 0.0f},
@@ -174,7 +169,6 @@ private:
 					}
 				}
 			}
-			// Also check the center
 			int gx, gy, gz;
 			if (grid->WorldToGrid(Vector3(pos.x, h, pos.z), gx, gy, gz))
 			{
@@ -201,7 +195,6 @@ private:
 		float dx = pos.x - blockCenter.x;
 		float dz = pos.z - blockCenter.z;
 
-		// Determine which face is closest for pushout
 		float absDx = std::abs(dx);
 		float absDz = std::abs(dz);
 		float halfBlock = bs * 0.5f;
@@ -209,7 +202,6 @@ private:
 
 		if (absDx >= absDz)
 		{
-			// Push along X
 			if (dx >= 0)
 			{
 				pos.x = blockCenter.x + halfBlock + halfBody + 0.1f;
@@ -221,7 +213,6 @@ private:
 		}
 		else
 		{
-			// Push along Z
 			if (dz >= 0)
 			{
 				pos.z = blockCenter.z + halfBlock + halfBody + 0.1f;
@@ -234,14 +225,12 @@ private:
 	}
 
 private:
-	// Movement
 	float moveSpeed;
 	float velocityY;
 	float gravity;
 	float jumpSpeed;
 	bool isGrounded;
 
-	// Camera
 	Object *cameraObject;
 	float eyeHeight;
 	float yaw;

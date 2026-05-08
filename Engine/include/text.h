@@ -35,7 +35,6 @@ public:
 
     virtual void Init() override;
 
-    /// Called by RenderSystem — performs the actual OpenGL draw.
     void Render();
 
     virtual TextComponent* Clone() const override {

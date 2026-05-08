@@ -1,8 +1,9 @@
 #pragma once
-#include "IVoxelRenderer.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <unordered_map>
+
+class LightComponent;
 
 struct VoxelMeshData {
     std::vector<float> vertices;
@@ -10,21 +11,20 @@ struct VoxelMeshData {
     unsigned int textureId;
 };
 
-class VoxelRenderer : public IVoxelRenderer {
+class VoxelRenderer {
 public:
     static VoxelRenderer& Get();
 
     void Init();
 
-    // Register a chunk to be rendered
-    void UpdateChunk(int cx, int cz, const glm::vec3& aabbMin, const glm::vec3& aabbMax, const std::vector<VoxelMeshData>& meshes);
+    void UpdateChunk(int cx, int cz, const std::vector<VoxelMeshData>& meshes);
     void RemoveChunk(int cx, int cz);
     void Clear();
 
     void SetHighlight(const glm::vec3& pos, bool active, float blockHalfSize);
 
-    void RenderChunks(const glm::mat4& view, const glm::mat4& projection, LightComponent* light, const Frustum& frustum) override;
-    void RenderChunksDepth(unsigned int depthProgram, const glm::mat4& lightVP, const Frustum& lightFrustum) override;
+    void RenderChunks(const glm::mat4& view, const glm::mat4& projection, LightComponent* light);
+    void RenderChunksDepth(unsigned int depthProgram, const glm::mat4& lightVP);
 
 private:
     VoxelRenderer() = default;
@@ -52,8 +52,6 @@ private:
     };
 
     struct ChunkRenderData {
-        glm::vec3 aabbMin;
-        glm::vec3 aabbMax;
         std::vector<MeshGroup> meshGroups;
     };
 

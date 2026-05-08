@@ -50,8 +50,6 @@ void GameScene::GenBackground()
         {
             Object *block_background = CreateObject();
             block_background->SetPosition(Vector2(i * block_size, j * block_size));
-
-           // block_background->SetRotation(0);
             if ((j==0)||(i % 2 == 1 && j % 2 == 0) || (i % 2 == 0 && j % 2 == 1))
             {
                 block_background->AddComponent(new Image(block_light_img));

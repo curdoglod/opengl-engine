@@ -6,10 +6,7 @@
 #include "BoxCollider3D.h"
 #include <algorithm>
 
-// ── Destructor ──────────────────────────────────────────────────────
-
 Scene::~Scene() {
-    // Flush any deferred deletes first (they are also in 'objects')
     pendingDeletes.clear();
     for (auto* object : objects) {
         delete object;
@@ -17,19 +14,14 @@ Scene::~Scene() {
     objects.clear();
 }
 
-// ── Lifecycle ───────────────────────────────────────────────────────
-
 void Scene::PreInit(Engine* engine, SDL_Window* window) {
     m_window = window;
     m_engine = engine;
     SetWindowSize((int)GetWindowSize().x, (int)GetWindowSize().y);
 }
 
-// ── Per-frame ───────────────────────────────────────────────────────
-
 void Scene::UpdateEvents(SDL_Event event) {
-    // Iterate by index to avoid allocation and safely handle additions.
-    // Deletions are deferred, so the vector elements won't be removed here.
+    // Deletions are deferred, so index iteration is stable here.
     size_t count = objects.size();
     for (size_t i = 0; i < count; ++i) {
         if (objects[i]->IsActive()) {
@@ -58,30 +50,28 @@ void Scene::UpdateEvents(SDL_Event event) {
 
 void Scene::UpdateScene(float deltaTime) {
     Update();
-    // Pass 1: Logic update (skip static objects — they have no meaningful Update)
+
     for (size_t i = 0; i < objects.size(); ++i) {
         if (objects[i]->IsActive() && !objects[i]->IsStatic()) {
             objects[i]->update(deltaTime);
         }
     }
+
     flushPendingDeletes();
-    // Pass 2: Collision callbacks
     dispatchCollisions();
-    // Pass 3: Late update
+
     for (size_t i = 0; i < objects.size(); ++i) {
         if (objects[i]->IsActive() && !objects[i]->IsStatic()) {
             objects[i]->lateUpdate(deltaTime);
         }
     }
+
     flushPendingDeletes();
-    // Deferred layer sort — once per frame instead of per-object-creation
     if (layerDirty) {
         updateLayer();
         layerDirty = false;
     }
 }
-
-// ── Object management ───────────────────────────────────────────────
 
 Object* Scene::CreateObject() {
     Object* object = new Object(this);
@@ -92,7 +82,7 @@ Object* Scene::CreateObject() {
 
 void Scene::DeleteObject(Object* object) {
     if (!object) return;
-    // Defer: mark inactive and queue for removal after iteration.
+    // Defer removal in case Update is iterating objects.
     object->SetActive(false);
     pendingDeletes.push_back(object);
 }
@@ -120,8 +110,6 @@ void Scene::updateLayer() {
     });
 }
 
-// ── Window / scene switching ────────────────────────────────────────
-
 Vector2 Scene::GetWindowSize() {
     int w, h;
     SDL_GetWindowSize(m_window, &w, &h);
@@ -146,11 +134,8 @@ void Scene::SetWindowSize(const int& w, const int& h) {
     Renderer::Get().SetWindowSize(w, h);
 }
 
-// ── Collision dispatch ──────────────────────────────────────────────
-
 void Scene::dispatchCollisions()
 {
-    // Gather all active objects that carry a BoxCollider3D
     std::vector<std::pair<Object*, BoxCollider3D*>> colliders;
     colliders.reserve(64);
     for (auto* obj : objects) {
@@ -160,18 +145,15 @@ void Scene::dispatchCollisions()
         if (col) colliders.push_back({obj, col});
     }
 
-    // Early out — no colliders means nothing to check
     if (colliders.size() < 2) return;
 
-    // 1. Broad-phase: Sort and Sweep along the X-axis
-    // O(N log N)
+    // Broad phase: sort and sweep on X.
     std::sort(colliders.begin(), colliders.end(), [](const auto& a, const auto& b) {
         float minXa = a.second->GetCenter().x - a.second->GetHalfExtents().x;
         float minXb = b.second->GetCenter().x - b.second->GetHalfExtents().x;
         return minXa < minXb;
     });
 
-    // 2. Narrow-phase: Check overlaps only for objects that overlap on the X-axis
     for (size_t i = 0; i < colliders.size(); ++i) {
         auto& [objA, colA] = colliders[i];
         float maxXa = colA->GetCenter().x + colA->GetHalfExtents().x;
@@ -180,14 +162,11 @@ void Scene::dispatchCollisions()
             auto& [objB, colB] = colliders[j];
             float minXb = colB->GetCenter().x - colB->GetHalfExtents().x;
 
-            // If the minimum X of B is greater than the maximum X of A,
-            // they cannot overlap on the X-axis. Since the array is sorted by minX,
-            // no subsequent colliders can overlap with A either. We can break early!
+            // Sorted by minX, so everything after B is also too far right.
             if (minXb > maxXa) {
                 break;
             }
 
-            // They overlap on the X-axis, so do a full 3D overlap check
             if (!colA->Overlaps(colB)) continue;
 
             bool trigger = colA->IsTrigger() || colB->IsTrigger();

@@ -10,20 +10,16 @@ void Rigidbody3D::Update(float dt)
 {
     if (!object) return;
 
-    // Apply gravity as an acceleration (a = g, not a = g * m)
     Vector3 frameAccel = acceleration;
     if (useGravity) {
         frameAccel.y += gravity;
     }
 
-    // Integrate velocity and position
     velocity += frameAccel * dt;
     object->SetPosition(object->GetPosition3D() + velocity * dt);
 
-    // Reset user-applied acceleration (gravity is re-applied each frame above)
     acceleration = Vector3(0, 0, 0);
 
-    // Resolve collisions after movement
     resolveCollisions();
 }
 
@@ -40,7 +36,6 @@ void Rigidbody3D::resolveCollisions()
     BoxCollider3D* myCol = object->GetComponent<BoxCollider3D>();
     if (!myCol) return;
 
-    // Ensure collider is up-to-date with current size
     myCol->AutoFitFromModel();
 
     const auto& objects = object->GetScene()->GetObjects();
@@ -50,14 +45,11 @@ void Rigidbody3D::resolveCollisions()
         BoxCollider3D* otherCol = otherObj->GetComponent<BoxCollider3D>();
         if (!otherCol) continue;
 
-        // Skip triggers for physics resolution
         if (myCol->IsTrigger() || otherCol->IsTrigger()) continue;
 
-        // Ensure other collider is up-to-date (harmless if already correct)
         otherCol->AutoFitFromModel();
 
         if (myCol->Overlaps(otherCol)) {
-            // Fire collision callbacks on both objects
             object->notifyCollisionEnter(otherObj);
             otherObj->notifyCollisionEnter(object);
 

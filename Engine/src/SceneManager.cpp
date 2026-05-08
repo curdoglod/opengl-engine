@@ -13,9 +13,7 @@ void SceneManager::Bind(Engine* engine, SDL_Window* window) {
 }
 
 void SceneManager::ReplaceScene(Scene* scene) {
-    // Move every scene on the stack to the pending-delete list.
-    // They will be destroyed at the start of the next frame,
-    // so it's safe to call this from inside a scene callback.
+    // Scene switches can happen inside callbacks, so delete old scenes next frame.
     while (!m_scenes.empty()) {
         m_pendingDelete.push_back(m_scenes.top());
         m_scenes.pop();
@@ -31,7 +29,7 @@ void SceneManager::PushScene(Scene* scene) {
 
 void SceneManager::PopScene() {
     if (m_scenes.size() <= 1)
-        return;                     // never pop the last scene
+        return;
 
     m_pendingDelete.push_back(m_scenes.top());
     m_scenes.pop();
@@ -54,8 +52,6 @@ void SceneManager::FlushPending() {
         delete s;
     m_pendingDelete.clear();
 }
-
-// ── private helpers ──────────────────────────────────────────────
 
 void SceneManager::initScene(Scene* scene) {
     scene->PreInit(m_engine, m_window);

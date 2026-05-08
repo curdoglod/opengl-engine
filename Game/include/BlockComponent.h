@@ -24,8 +24,6 @@ public:
 		if (object->GetSize3D() == Vector3(0,0,0)) {
 			object->SetSize(Vector3(1,1,1));
 		}
-		// No BoxCollider3D — block collision is handled by grid-based raycasting
-		// in PlayerController, not by the O(n²) physics system.
 		applyTypeTexture();
 	}
 

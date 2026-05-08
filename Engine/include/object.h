@@ -54,7 +54,6 @@ public:
     }
     Object* CloneObject() const;
 
-    // Collision notification helpers (called by Scene)
     void notifyCollisionEnter(Object* other);
     void notifyTriggerEnter(Object* other);
 

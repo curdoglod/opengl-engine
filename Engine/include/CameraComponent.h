@@ -7,8 +7,6 @@ class Scene;
 class CameraComponent : public Component {
 public:
 
-
-    // Camera parameters
     void SetPerspective(float fovDeg, float aspect, float nearZ, float farZ) {
         fov = fovDeg; aspectRatio = aspect; nearPlane = nearZ; farPlane = farZ;
     }
@@ -18,7 +16,6 @@ public:
     glm::mat4 GetViewMatrix() const;
     glm::mat4 GetProjectionMatrix() const;
 
-    // Static access to the first active camera in the scene
     static CameraComponent* FindActive(Scene* scene);
 
 private:
@@ -28,5 +25,4 @@ private:
     float farPlane = 100.0f;
     bool active = true;
 };
-
 

@@ -90,10 +90,10 @@ bool Sprite::loadTextureFromMemory(const std::vector<unsigned char>& imageData) 
 
 void Sprite::initRenderData() {
     float vertices[] = {
-        0.0f, 1.0f,   0.0f, 1.0f,  // bottom-left
-        1.0f, 1.0f,   1.0f, 1.0f,  // bottom-right
-        1.0f, 0.0f,   1.0f, 0.0f,  // top-right
-        0.0f, 0.0f,   0.0f, 0.0f   // top-left
+        0.0f, 1.0f,   0.0f, 1.0f,
+        1.0f, 1.0f,   1.0f, 1.0f,
+        1.0f, 0.0f,   1.0f, 0.0f,
+        0.0f, 0.0f,   0.0f, 0.0f
     };
 
     unsigned int indices[] = {
@@ -128,7 +128,6 @@ void Sprite::draw(const Vector2& pos, float angle) {
     GLuint prog = ResourceManager::Get().GetOrCreateShader("sprite", vertexShaderSource, fragmentShaderSource);
     glUseProgram(prog);
 
-    // Build model matrix: translate, rotate around center, then scale.
     glm::mat4 model = glm::mat4(1.0f);
     model = glm::translate(model, glm::vec3(pos.x, pos.y, 0.0f));
     model = glm::translate(model, glm::vec3(width * 0.5f, height * 0.5f, 0.0f));

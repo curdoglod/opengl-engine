@@ -48,7 +48,6 @@ public:
     {
         if (object != nullptr && moveDirection != 0)
         {
-            //windowSize = object->GetScene()->GetWindowSize();
             object->MoveX(moveDirection * 20);
             if (object->GetPosition().x <= 0)
                 object->SetPosition(Vector2(0, object->GetPosition().y));

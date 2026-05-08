@@ -4,8 +4,7 @@
 #include "object.h"
 #include "Model3DComponent.h"
 #include "CameraComponent.h"
-#include "IVoxelRenderer.h"
-#include "Frustum.h"
+#include "VoxelRenderer.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <vector>
@@ -102,7 +101,7 @@ void LightComponent::ensureShadowResources()
 
 void LightComponent::computeLightMatrices(Scene* scene)
 {
-    // Camera-centered fixed shadow frustum — O(1) cost.
+    // Keep the shadow box centered near the camera.
     glm::vec3 center(0.0f);
     const auto& objects = scene->GetObjects();
     for (auto* obj : objects) {
@@ -123,7 +122,7 @@ void LightComponent::computeLightMatrices(Scene* scene)
     lightView = glm::lookAt(lightPos, center, up);
     lightProj = glm::ortho(-range, range, -range, range, 0.1f, range * 4.0f);
 
-    // Snap to texel grid to prevent shadow swimming
+    // Texel snapping keeps shadows from shimmering while the camera moves.
     glm::mat4 shadowMat = lightProj * lightView;
     glm::vec4 origin = shadowMat * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
     origin.x *= (float)shadowWidth  * 0.5f;
@@ -163,7 +162,6 @@ void LightComponent::RenderShadowMap(Scene* scene)
         if (!obj->IsActive()) continue;
         auto* modelComp = obj->GetComponent<Model3DComponent>();
         if (!modelComp) continue;
-        // Distance culling — skip objects far from camera
         Vector3 p = obj->GetPosition3D();
         float dx = p.x - shadowCenter.x;
         float dz = p.z - shadowCenter.z;
@@ -172,12 +170,7 @@ void LightComponent::RenderShadowMap(Scene* scene)
         modelComp->RenderDepthPass(model, depthProgram);
     }
 
-    // Batch-rendered voxel chunks — frustum-culled against light ortho box
-    if (IVoxelRenderer::s_instance) {
-        Frustum lightFrustum;
-        lightFrustum.Extract(lightVP);
-        IVoxelRenderer::s_instance->RenderChunksDepth(depthProgram, lightVP, lightFrustum);
-    }
+    VoxelRenderer::Get().RenderChunksDepth(depthProgram, lightVP);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glUseProgram(0);
@@ -190,7 +183,7 @@ LightComponent* LightComponent::FindActive(Scene* scene)
     const auto& objects = scene->GetObjects();
     for (auto* obj : objects) {
         auto* light = obj->GetComponent<LightComponent>();
-        if (light) return light; // first light
+        if (light) return light;
     }
     return nullptr;
 }

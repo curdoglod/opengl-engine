@@ -14,8 +14,6 @@ ResourceManager& ResourceManager::Get() {
     return instance;
 }
 
-// ── Textures ──────────────────────────────────────────────────────────────────
-
 GLuint ResourceManager::LoadTexture(const std::string& path) {
     auto it = m_textureCache.find(path);
     if (it != m_textureCache.end()) return it->second;
@@ -71,8 +69,6 @@ GLuint ResourceManager::uploadSurface(SDL_Surface* surface) {
     return id;
 }
 
-// ── Shaders ───────────────────────────────────────────────────────────────────
-
 GLuint ResourceManager::GetOrCreateShader(const std::string& name,
                                            const char* vertSrc,
                                            const char* fragSrc) {
@@ -117,8 +113,6 @@ GLuint ResourceManager::compileProgram(const char* vertSrc, const char* fragSrc)
     return prog;
 }
 
-// ── Meshes ────────────────────────────────────────────────────────────────────
-
 static void processMeshIntoShared(aiMesh* mesh, const aiScene* scene, const std::string& directory, SharedMeshData& out) {
     std::vector<float> vertices;
     std::vector<unsigned int> indices;
@@ -127,7 +121,6 @@ static void processMeshIntoShared(aiMesh* mesh, const aiScene* scene, const std:
     bool hasNormals = mesh->HasNormals();
 
     for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
-        // Position
         float px = mesh->mVertices[i].x;
         float py = mesh->mVertices[i].y;
         float pz = mesh->mVertices[i].z;
@@ -135,7 +128,6 @@ static void processMeshIntoShared(aiMesh* mesh, const aiScene* scene, const std:
         vertices.push_back(py);
         vertices.push_back(pz);
 
-        // Update AABB
         out.aabbMin.x = std::min(out.aabbMin.x, px);
         out.aabbMin.y = std::min(out.aabbMin.y, py);
         out.aabbMin.z = std::min(out.aabbMin.z, pz);
@@ -143,7 +135,6 @@ static void processMeshIntoShared(aiMesh* mesh, const aiScene* scene, const std:
         out.aabbMax.y = std::max(out.aabbMax.y, py);
         out.aabbMax.z = std::max(out.aabbMax.z, pz);
 
-        // Normal
         if (hasNormals) {
             vertices.push_back(mesh->mNormals[i].x);
             vertices.push_back(mesh->mNormals[i].y);
@@ -151,7 +142,6 @@ static void processMeshIntoShared(aiMesh* mesh, const aiScene* scene, const std:
         } else {
             vertices.push_back(0.0f); vertices.push_back(0.0f); vertices.push_back(1.0f);
         }
-        // UV
         if (hasTex) {
             vertices.push_back(mesh->mTextureCoords[0][i].x);
             vertices.push_back(mesh->mTextureCoords[0][i].y);
@@ -176,13 +166,10 @@ static void processMeshIntoShared(aiMesh* mesh, const aiScene* scene, const std:
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
 
     int stride = 8 * sizeof(float);
-    // aPos (location 0)
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glEnableVertexAttribArray(0);
-    // aTexCoord (location 1) — after pos(3) + normal(3)
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(1);
-    // aNormal (location 2) — after pos(3)
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
@@ -190,7 +177,6 @@ static void processMeshIntoShared(aiMesh* mesh, const aiScene* scene, const std:
 
     entry.numIndices = (unsigned int)indices.size();
 
-    // Load diffuse texture from material
     if (mesh->mMaterialIndex < scene->mNumMaterials) {
         aiMaterial* mat = scene->mMaterials[mesh->mMaterialIndex];
         if (mat->GetTextureCount(aiTextureType_DIFFUSE) > 0) {
@@ -230,8 +216,6 @@ const SharedMeshData* ResourceManager::GetOrLoadMesh(const std::string& path) {
     processNodeIntoShared(scene->mRootNode, scene, directory, data);
     return &data;
 }
-
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 void ResourceManager::ReleaseAll() {
     for (auto& [key, id] : m_textureCache)

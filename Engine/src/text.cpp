@@ -7,10 +7,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
-#include "engine.h" // Assumes GetDefaultArchive() is available here
-#include "Utils.h"  // If you need your Vector2, Color, etc.
+#include "engine.h"
+#include "Utils.h"
 
-// ============================ Shaders ============================
 static const char *vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec2 aPos;
@@ -39,14 +38,11 @@ uniform vec4 textColor;
 
 void main()
 {
-    // Sample pixel color from texture
     vec4 sampled = texture(textTexture, TexCoord);
-    // Multiply by textColor (can control opacity, etc.)
     FragColor = sampled * textColor;
 }
 )";
 
-// ============================ Constructor/Destructor ============================
 TextComponent::TextComponent(int fontSize, const std::string &text, const Color &color, TextAlignment align)
     : fontSize(fontSize), text(text), color(color), alignment(align), font(nullptr), textureID(0), textWidth(0), textHeight(0), VAO(0), VBO(0), EBO(0)
 {
@@ -73,10 +69,8 @@ TextComponent::~TextComponent()
     }
 }
 
-// ============================ Initialization ============================
 void TextComponent::Init()
 {
-    // Load font from DefaultArchive
     fontDataBuffer = Engine::GetDefaultArchive()->GetFile("Roboto-Black.ttf");
     SDL_RWops *rw = SDL_RWFromConstMem(fontDataBuffer.data(), fontDataBuffer.size());
     if (!rw)
@@ -91,22 +85,17 @@ void TextComponent::Init()
         return;
     }
 
-    // Create VAO/VBO/EBO for rendering (1x1 quad, then scale)
     initRenderData();
-
-    // Create texture from text
     updateTexture();
 }
 
 void TextComponent::initRenderData()
 {
-    // Simple quad (0,0) -> (1,1), later scaled to text size
     float vertices[] = {
-        // Position  // TexCoords
-        0.0f, 1.0f, 0.0f, 1.0f, // bottom-left
-        1.0f, 1.0f, 1.0f, 1.0f, // bottom-right
-        1.0f, 0.0f, 1.0f, 0.0f, // top-right
-        0.0f, 0.0f, 0.0f, 0.0f  // top-left
+        0.0f, 1.0f, 0.0f, 1.0f,
+        1.0f, 1.0f, 1.0f, 1.0f,
+        1.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f
     };
 
     unsigned int indices[] = {
@@ -125,24 +114,20 @@ void TextComponent::initRenderData()
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    // Position
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
 
-    // Texture coordinates
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
 }
 
-// ============================ Create OpenGL texture from SDL_Surface ============================
 bool TextComponent::createTextureFromSurface(SDL_Surface *surface)
 {
     if (!surface)
         return false;
 
-    // Delete old texture if present
     if (textureID)
     {
         glDeleteTextures(1, &textureID);
@@ -152,31 +137,25 @@ bool TextComponent::createTextureFromSurface(SDL_Surface *surface)
     textWidth = surface->w;
     textHeight = surface->h;
 
-    // Determine format (prefer TTF_RenderText_Blended to get 32bpp RGBA)
     GLenum format = GL_RGBA;
     int bytesPerPixel = surface->format->BytesPerPixel;
     if (bytesPerPixel == 4)
     {
-        // Assume RGBA
         format = GL_RGBA;
     }
     else
     {
-        // Assume RGB
         format = GL_RGB;
     }
 
-    // Create OpenGL texture
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
 
-    // Texture parameters
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    // Upload pixels to texture
     glTexImage2D(GL_TEXTURE_2D, 0, format, textWidth, textHeight, 0, format,
                  GL_UNSIGNED_BYTE, surface->pixels);
 
@@ -185,13 +164,11 @@ bool TextComponent::createTextureFromSurface(SDL_Surface *surface)
     return true;
 }
 
-// ============================ Recreate text texture ============================
 void TextComponent::updateTexture()
 {
     if (!font)
         return;
 
-    // SDL_ttf may return 8bpp surface; use Blended to ensure RGBA32
     SDL_Color sdlColor = {color.r, color.g, color.b, color.a};
     SDL_Surface *surface = TTF_RenderText_Blended(font, text.c_str(), sdlColor);
     if (!surface)
@@ -200,9 +177,9 @@ void TextComponent::updateTexture()
         return;
     }
 
-    // Convert to RGBA32 (Byte order: RGBA)
+    // Keep text upload format predictable for OpenGL.
     SDL_Surface *convSurface = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
-    SDL_FreeSurface(surface); // Original surface no longer needed
+    SDL_FreeSurface(surface);
 
     if (!convSurface)
     {
@@ -210,14 +187,11 @@ void TextComponent::updateTexture()
         return;
     }
 
-    // Now convSurface->format->BytesPerPixel == 4 with RGBA channel order
-    // Safe to upload to OpenGL:
     createTextureFromSurface(convSurface);
 
     SDL_FreeSurface(convSurface);
 }
 
-// ============================ Public methods ============================
 void TextComponent::setText(const std::string &newText)
 {
     text = newText;
@@ -240,19 +214,15 @@ void TextComponent::setAlignment(TextAlignment newAlignment)
 void TextComponent::Render()
 {
     glDisable(GL_DEPTH_TEST);
-    // Nothing to draw if texture or VAO is missing
     if (!textureID || !VAO)
         return;
 
-    // For simplicity, take position and angle from object
     float angle = object->GetAngle().z;
     Vector2 pos = object->GetPosition();
     Vector2 size = object->GetSize();
 
-    // Compute model matrix
     glm::mat4 model(1.0f);
 
-    // Horizontal alignment:
     switch (alignment)
     {
     case TextAlignment::LEFT:
@@ -264,7 +234,6 @@ void TextComponent::Render()
         pos.x += (size.x) - textWidth;
         break;
     }
-    // Vertically center within object
     pos.y += (size.y * 0.5f) - (textHeight * 0.5f);
 
     model = glm::translate(model, glm::vec3(pos.x, pos.y, 0.0f));

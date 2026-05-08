@@ -12,7 +12,6 @@ void Arkanoid3DScene::Init()
     cameraObj->SetPosition(Vector3(0.0f, 120.0f / 35.0f, 78.0f / 35.0f));
     cameraObj->SetRotation(Vector3(30.0f, 0.0f, 0.0f));
 
-    // Directional light
     lightObj = CreateObject();
     auto* light = new LightComponent();
     light->SetDirection(glm::vec3(0.2f, -1.0f, 0.1f));

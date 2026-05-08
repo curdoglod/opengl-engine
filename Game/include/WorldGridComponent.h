@@ -20,9 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
-// WorldGridComponent keeps a Minecraft-like world as block data, not as one
-// Object per cube. Blocks are grouped into chunks, and every chunk is rendered
-// as a small set of meshes containing only visible faces.
+// Voxel world stored as chunks, not one Object per block.
 
 static constexpr int CHUNK_SIZE = 16;
 
@@ -48,8 +46,7 @@ struct Chunk {
 	bool generated = false;
 	bool meshDirty = true;
 
-	// lx/lz are inside [0, 15], so they fit in 4 bits each. ly uses the
-	// remaining upper bits. This lets the chunk store blocks in one hash map.
+	// Local block coordinates packed into one map key.
 	static int PackLocal(int lx, int ly, int lz) {
 		return (ly << 8) | (lz << 4) | lx;
 	}
@@ -96,9 +93,7 @@ public:
 		rebuildDirtyMeshes();
 	}
 
-	// ---------------------------------------------------------------------
-	// Public setup
-	// ---------------------------------------------------------------------
+	// Setup
 
 	void SetBlockSize(float size) { blockSize = size; }
 	float GetBlockSize() const { return blockSize; }
@@ -113,8 +108,7 @@ public:
 		undergroundType = underground;
 	}
 
-	// Kept for compatibility with older grid code. The chunked terrain no
-	// longer has one fixed width/height/origin.
+	// Old fixed-grid API. Chunks do not need these values.
 	void SetSize(int, int) {}
 	void SetOrigin(float, float) {}
 	void SetMaxRenderDistance(float) {}
@@ -142,9 +136,7 @@ public:
 		cameraObj = camera;
 	}
 
-	// ---------------------------------------------------------------------
-	// Coordinate conversion
-	// ---------------------------------------------------------------------
+	// Coordinates
 
 	bool WorldToGrid(const Vector3& world, int& gx, int& gy, int& gz) const {
 		gx = (int)std::floor(world.x / blockSize + 0.5f);
@@ -161,9 +153,7 @@ public:
 		return (getTerrainHeight(gx, gz) + 1) * blockSize;
 	}
 
-	// ---------------------------------------------------------------------
-	// Block access
-	// ---------------------------------------------------------------------
+	// Blocks
 
 	bool HasBlock(int gx, int gy, int gz) const {
 		const Chunk* chunk = findGeneratedChunkForBlock(gx, gz);
@@ -175,8 +165,7 @@ public:
 	}
 
 	Object* GetBlock(int gx, int gy, int gz) const {
-		// The old API returned Object*. Blocks are now stored as data, so callers
-		// only use this as a yes/no value.
+		// Blocks are data now; old callers only need a non-null value.
 		return HasBlock(gx, gy, gz) ? reinterpret_cast<Object*>(1) : nullptr;
 	}
 
@@ -221,8 +210,7 @@ public:
 	Object* CreateBlockAt(int gx, int gz, BlockType type) { return CreateBlockAt(gx, 0, gz, type); }
 	void RemoveBlockAt(int gx, int gz) { RemoveBlockAt(gx, 0, gz); }
 
-	// Used by scene setup to make sure the starting area exists before the
-	// player begins moving.
+	// Build the spawn area immediately.
 	void ForceGenerateArea(int gx, int gz, int radiusChunks = 1) {
 		int centerCx, centerCz, lx, lz;
 		globalToChunk(gx, gz, centerCx, centerCz, lx, lz);
@@ -256,7 +244,6 @@ private:
 	static constexpr int CHUNKS_GENERATED_PER_FRAME = 8;
 	static constexpr int CHUNK_MESHES_REBUILT_PER_FRAME = 8;
 	static constexpr int CHUNK_UNLOAD_MARGIN = 2;
-	static constexpr int ASSUMED_MAX_CHUNK_HEIGHT = 64;
 	static constexpr int FLOATS_PER_VERTEX = 8;
 
 	enum FaceDirection {
@@ -268,9 +255,7 @@ private:
 		FaceNegativeZ = 5
 	};
 
-	// ---------------------------------------------------------------------
 	// Chunk coordinates
-	// ---------------------------------------------------------------------
 
 	static void globalToChunk(int gx, int gz, int& cx, int& cz, int& lx, int& lz) {
 		cx = floorDiv(gx, CHUNK_SIZE);
@@ -313,9 +298,7 @@ private:
 		return chunk;
 	}
 
-	// ---------------------------------------------------------------------
 	// Terrain height
-	// ---------------------------------------------------------------------
 
 	static float hashNoise(int x, int z, unsigned int seed) {
 		unsigned int n = (unsigned int)(x * 73856093) ^ (unsigned int)(z * 19349663) ^ seed;
@@ -361,9 +344,7 @@ private:
 		return std::max(1, baseHeight + (int)(combined * maxHillHeight));
 	}
 
-	// ---------------------------------------------------------------------
-	// Chunk lifetime and streaming
-	// ---------------------------------------------------------------------
+	// Chunk streaming
 
 	void updateChunksAroundPlayer() {
 		if (!object || !object->GetScene()) return;
@@ -515,9 +496,7 @@ private:
 		}
 	}
 
-	// ---------------------------------------------------------------------
-	// Mesh rebuild
-	// ---------------------------------------------------------------------
+	// Meshes
 
 	void rebuildDirtyMeshes() {
 		int rebuilt = 0;
@@ -546,12 +525,7 @@ private:
 		}
 
 		std::vector<VoxelMeshData> meshes = buildRendererMeshes(verticesByType, indicesByType);
-		VoxelRenderer::Get().UpdateChunk(
-			chunk->coord.cx,
-			chunk->coord.cz,
-			getChunkAabbMin(chunk),
-			getChunkAabbMax(chunk),
-			meshes);
+		VoxelRenderer::Get().UpdateChunk(chunk->coord.cx, chunk->coord.cz, meshes);
 
 		chunk->meshDirty = false;
 	}
@@ -638,22 +612,7 @@ private:
 		}
 	}
 
-	glm::vec3 getChunkAabbMin(const Chunk* chunk) const {
-		return glm::vec3(
-			chunk->coord.cx * CHUNK_SIZE * blockSize,
-			0.0f,
-			chunk->coord.cz * CHUNK_SIZE * blockSize);
-	}
-
-	glm::vec3 getChunkAabbMax(const Chunk* chunk) const {
-		return glm::vec3(
-			(chunk->coord.cx + 1) * CHUNK_SIZE * blockSize,
-			ASSUMED_MAX_CHUNK_HEIGHT * blockSize,
-			(chunk->coord.cz + 1) * CHUNK_SIZE * blockSize);
-	}
-
-	// Vertex layout sent to VoxelRenderer:
-	// position.xyz, normal.xyz, uv.xy = 8 floats per vertex.
+	// Vertex layout: position.xyz, normal.xyz, uv.xy.
 	static void appendFace(std::vector<float>& vertices,
 						   std::vector<unsigned int>& indices,
 						   float centerX,
@@ -750,9 +709,7 @@ private:
 		out[7] = v;
 	}
 
-	// ---------------------------------------------------------------------
 	// Textures
-	// ---------------------------------------------------------------------
 
 	void preloadTextures() {
 		auto& resources = ResourceManager::Get();

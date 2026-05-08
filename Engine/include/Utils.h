@@ -7,11 +7,7 @@ struct Vector3;
 struct Vector2 {
 	float x, y;
 
-
 	Vector2() : x(0), y(0) {}
-	/**
-   X, Y
-*/
 	Vector2(float x, float y) : x(x), y(y) {}
 
 

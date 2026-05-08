@@ -7,13 +7,12 @@
 #include <SDL.h>
 #include <iostream>
 
-// ==================== Shaders (Lambert lighting + basic shadows) ====================
 static const char* vertexShaderSource = R"(
 #version 330 core
 
-layout(location = 0) in vec3 aPos;       // Vertex position
-layout(location = 1) in vec2 aTexCoord;  // UV
-layout(location = 2) in vec3 aNormal;    // Normal
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec2 aTexCoord;
+layout(location = 2) in vec3 aNormal;
 
 out vec2 TexCoord;
 out vec3 Normal;     
@@ -27,15 +26,12 @@ uniform mat4 lightVP;
 
 void main()
 {
-    // Vertex position in world coordinates
     vec4 worldPos = model * vec4(aPos, 1.0);
     gl_Position   = projection * view * worldPos;
 
-    // Pass to fragment shader
     FragPos  = worldPos.xyz;
     TexCoord = aTexCoord;
 
-    // Normal transform (accounts for scale/rotation)
     mat3 normalMatrix = mat3(transpose(inverse(model)));
     Normal = normalize(normalMatrix * aNormal);
 
@@ -52,16 +48,14 @@ in vec3 Normal;
 in vec3 FragPos;
 in vec4 LightSpacePos;
 
-// Textures
 uniform sampler2D ourTexture;
 uniform sampler2D shadowMap;
 
-// Light parameters
-uniform vec3 lightDir;      // light direction (world)
-uniform vec3 lightColor;    // light color
-uniform vec3 ambientColor;  // ambient color
-uniform int useShadows;     // 0/1
-uniform vec4 highlightTint; // rgb=tint color, a=mix factor (0=no tint)
+uniform vec3 lightDir;
+uniform vec3 lightColor;
+uniform vec3 ambientColor;
+uniform int useShadows;
+uniform vec4 highlightTint;
 
 float ShadowCalculation(vec4 lightSpacePos, vec3 normal, vec3 lightDirection)
 {
@@ -73,11 +67,10 @@ float ShadowCalculation(vec4 lightSpacePos, vec3 normal, vec3 lightDirection)
 
     float currentDepth = projCoords.z;
 
-    // Slope-scaled bias: small values to keep shadow close to geometry
+    // Bias keeps lit faces from shadowing themselves.
     float cosTheta = max(dot(normalize(normal), -normalize(lightDirection)), 0.0);
     float bias = mix(0.002, 0.0004, cosTheta);
 
-    // 5x5 PCF for softer shadow edges
     float shadow = 0.0;
     vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
     int samples = 0;
@@ -90,7 +83,7 @@ float ShadowCalculation(vec4 lightSpacePos, vec3 normal, vec3 lightDirection)
     }
     shadow /= float(samples);
 
-    // Fade shadow near shadow-map borders to avoid hard cutoff
+    // Fade at the shadow-map edge so the cutoff is less obvious.
     float fadeRange = 0.05;
     float fadeFactor = 1.0;
     fadeFactor *= smoothstep(0.0, fadeRange, projCoords.x);
@@ -121,7 +114,6 @@ void main()
 }
 )";
 
-// ==================== Constructor/Destructor ====================
 Model3DComponent::Model3DComponent(const std::string& modelPath)
     : modelPath(modelPath)
 {
@@ -129,10 +121,8 @@ Model3DComponent::Model3DComponent(const std::string& modelPath)
 
 Model3DComponent::~Model3DComponent()
 {
-    // Mesh geometry is owned by ResourceManager — nothing to delete here.
 }
 
-// ==================== Init: Load model via shared ResourceManager cache ====================
 void Model3DComponent::Init()
 {
     sharedMesh = ResourceManager::Get().GetOrLoadMesh(modelPath);
@@ -140,13 +130,11 @@ void Model3DComponent::Init()
         std::cerr << "Failed to load model: " << modelPath << std::endl;
         return;
     }
-    // Copy AABB from shared data
     aabbMin = sharedMesh->aabbMin;
     aabbMax = sharedMesh->aabbMax;
     aabbComputed = true;
     modelDims = aabbMax - aabbMin;
 
-    // If the owning object has no size set, initialise it from the model's natural size
     if (object && object->GetSize3D().x == 0 && object->GetSize3D().y == 0 && object->GetSize3D().z == 0) {
         object->SetSize(Vector3(modelDims.x, modelDims.y, modelDims.z));
     }
@@ -173,13 +161,9 @@ glm::mat4 Model3DComponent::ComputeModelMatrix() const
     if (aabbComputed) {
         glm::vec3 dims = aabbMax - aabbMin;
         glm::vec3 center = (aabbMin + aabbMax) * 0.5f;
-        if (modelDims == glm::vec3(0.0f)) {
-            // const_cast is safe-ish here to initialize cache; but avoid mutating.
-        }
         float sx = dims.x != 0.0f ? targetSize.x / dims.x : 1.0f;
         float sy = dims.y != 0.0f ? targetSize.y / dims.y : 1.0f;
         float sz = dims.z != 0.0f ? targetSize.z / dims.z : 1.0f;
-        // First translate to center the model at origin, then scale
         local = glm::scale(local, glm::vec3(sx, sy, sz));
         local = glm::translate(local, -center);
     } else {
@@ -225,10 +209,8 @@ bool Model3DComponent::SetAlbedoTextureFromFile(const std::string& fullPath)
     return true;
 }
 
-// Returns a 1×1 white texture used as a fallback when no shadow map is available.
-// This prevents the GPU driver from warning about an unbound sampler on unit 1.
-// We use GL_RED (not GL_DEPTH_COMPONENT) because macOS's OpenGL driver may reject
-// incomplete depth textures bound to a regular sampler2D.
+// Fallback texture for frames without a real shadow map.
+// GL_RED avoids incomplete-depth-texture issues on macOS.
 static GLuint getDummyShadowMap() {
     static GLuint dummy = 0;
     if (dummy == 0) {
@@ -243,7 +225,6 @@ static GLuint getDummyShadowMap() {
     return dummy;
 }
 
-// ==================== Render: called by RenderSystem ==========================
 void Model3DComponent::Render(const glm::mat4& view, const glm::mat4& projection, LightComponent* light)
 {
     glm::mat4 model = ComputeModelMatrix();
@@ -275,12 +256,10 @@ void Model3DComponent::Render(const glm::mat4& view, const glm::mat4& projection
     }
     const Uniforms& u = it->second;
 
-    // Upload matrices
     glUniformMatrix4fv(u.model, 1, GL_FALSE, glm::value_ptr(model));
     glUniformMatrix4fv(u.view,  1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(u.proj,  1, GL_FALSE, glm::value_ptr(projection));
 
-    // Lighting parameters
     glm::vec3 lightDir(0.0f, 0.0f, -1.0f);
     glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
     glm::vec3 ambientColor(0.2f, 0.2f, 0.2f);
@@ -295,8 +274,7 @@ void Model3DComponent::Render(const glm::mat4& view, const glm::mat4& projection
         useShadows = light->IsShadowEnabled() && (light->GetDepthTexture() != 0) ? 1 : 0;
     }
 
-    // Always bind a valid texture to unit 1 so the sampler is never unbound.
-    // Use the real shadow map when available, otherwise a 1×1 dummy depth texture.
+    // Keep the sampler bound even when shadows are off.
     GLuint shadowTex = (light && light->GetDepthTexture() != 0)
                        ? light->GetDepthTexture()
                        : getDummyShadowMap();
@@ -311,7 +289,6 @@ void Model3DComponent::Render(const glm::mat4& view, const glm::mat4& projection
     glUniform1i(u.useShadows, useShadows);
     glUniform4fv(u.highlightTint, 1, glm::value_ptr(highlightTint));
 
-    // Bind albedo texture and draw each mesh
     if (!sharedMesh) { glUseProgram(0); return; }
     for (const auto& mesh : sharedMesh->meshes) {
         GLuint albedoTex = overrideAlbedoTexture ? overrideAlbedoTexture : mesh.diffuseTexture;

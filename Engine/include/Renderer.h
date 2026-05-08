@@ -3,11 +3,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-// ---------------------------------------------------------------------------
-// Renderer — lightweight singleton that stores global render state
-// (window dimensions, projection matrices) so that individual components
-// (Sprite, TextComponent, etc.) no longer need to hard-code values.
-// ---------------------------------------------------------------------------
+// Shared render state used by components.
 class Renderer {
 public:
     static Renderer& Get() {
@@ -23,7 +19,6 @@ public:
     int GetWindowWidth()  const { return windowWidth; }
     int GetWindowHeight() const { return windowHeight; }
 
-    /// Orthographic projection matching the current window size (for 2D / UI).
     glm::mat4 GetOrthoProjection() const {
         return glm::ortho(0.0f,
                           static_cast<float>(windowWidth),

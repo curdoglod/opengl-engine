@@ -29,10 +29,6 @@ public:
             }
         }
 
-        //std::cout << "Loaded files:" << std::endl;
-        for (const auto& [key, data] : unpackedFiles) {
-          //  std::cout << "  " << key << " (" << data.size() << " bytes)" << std::endl;
-        }
         return true;
     }
 

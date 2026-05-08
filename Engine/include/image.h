@@ -49,12 +49,10 @@ public:
             object->InitSize(this);
         }
     }
-    /// Called by RenderSystem — performs the actual OpenGL draw.
     void Render()
     {
         if (sprite != nullptr)
         {
-            // Keep sprite size in sync with object size
             Vector2 objSize = object->GetSize();
             if (objSize.x > 0 && objSize.y > 0) {
                 sprite->setSize((int)objSize.x, (int)objSize.y);

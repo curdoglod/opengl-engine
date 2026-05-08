@@ -10,14 +10,10 @@ VoxelRenderer& VoxelRenderer::Get() {
 }
 
 void VoxelRenderer::Init() {
-    IVoxelRenderer::s_instance = this;
 }
 
 VoxelRenderer::~VoxelRenderer() {
     Clear();
-    if (IVoxelRenderer::s_instance == this) {
-        IVoxelRenderer::s_instance = nullptr;
-    }
 }
 
 void VoxelRenderer::freeChunkMeshes(ChunkRenderData& chunk) {
@@ -29,13 +25,10 @@ void VoxelRenderer::freeChunkMeshes(ChunkRenderData& chunk) {
     chunk.meshGroups.clear();
 }
 
-void VoxelRenderer::UpdateChunk(int cx, int cz, const glm::vec3& aabbMin, const glm::vec3& aabbMax, const std::vector<VoxelMeshData>& meshes) {
+void VoxelRenderer::UpdateChunk(int cx, int cz, const std::vector<VoxelMeshData>& meshes) {
     ChunkKey key{cx, cz};
     auto& chunk = m_chunks[key];
     freeChunkMeshes(chunk);
-
-    chunk.aabbMin = aabbMin;
-    chunk.aabbMax = aabbMax;
 
     for (const auto& meshData : meshes) {
         if (meshData.indices.empty()) continue;
@@ -175,7 +168,7 @@ void main(){
     return ResourceManager::Get().GetOrCreateShader("chunk_mesh", vs, fs);
 }
 
-void VoxelRenderer::RenderChunks(const glm::mat4& view, const glm::mat4& projection, LightComponent* light, const Frustum& frustum) {
+void VoxelRenderer::RenderChunks(const glm::mat4& view, const glm::mat4& projection, LightComponent* light) {
     GLuint prog = getOrCreateChunkShader();
     glUseProgram(prog);
 
@@ -237,8 +230,6 @@ void VoxelRenderer::RenderChunks(const glm::mat4& view, const glm::mat4& project
     for (const auto& [cc, chunk] : m_chunks) {
         if (chunk.meshGroups.empty()) continue;
 
-        if (!frustum.TestAABB(chunk.aabbMin, chunk.aabbMax)) continue;
-
         for (const auto& mg : chunk.meshGroups) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, mg.textureId);
@@ -251,7 +242,7 @@ void VoxelRenderer::RenderChunks(const glm::mat4& view, const glm::mat4& project
     glUseProgram(0);
 }
 
-void VoxelRenderer::RenderChunksDepth(GLuint depthProgram, const glm::mat4& lightVP, const Frustum& lightFrustum) {
+void VoxelRenderer::RenderChunksDepth(GLuint depthProgram, const glm::mat4& lightVP) {
     static std::unordered_map<GLuint, GLint> depthModelLocCache;
     GLint modelLoc;
     auto it = depthModelLocCache.find(depthProgram);
@@ -267,8 +258,6 @@ void VoxelRenderer::RenderChunksDepth(GLuint depthProgram, const glm::mat4& ligh
 
     for (const auto& [cc, chunk] : m_chunks) {
         if (chunk.meshGroups.empty()) continue;
-
-        if (!lightFrustum.TestAABB(chunk.aabbMin, chunk.aabbMax)) continue;
 
         for (const auto& mg : chunk.meshGroups) {
             glBindVertexArray(mg.VAO);

@@ -17,9 +17,6 @@ public:
     virtual void Update(float deltaTime) {
     }
 
-    // Called after ALL objects have run Update().
-    // Use for logic that depends on the final state of other objects
-    // this frame (e.g. camera following). Rendering is handled by RenderSystem.
     virtual void LateUpdate(float deltaTime) {
     }
  
@@ -36,10 +33,7 @@ public:
     virtual void onKeyPressed(SDL_Keycode key) {}
     virtual void onKeyReleased(SDL_Keycode key) {}
 
-    // --- Collision callbacks (called by the physics system) ----------------
-    // Solid-vs-solid collision (non-trigger).
     virtual void OnCollisionEnter(Object* other) {}
-    // Trigger overlap.
     virtual void OnTriggerEnter(Object* other) {}
 
     virtual Component* Clone() const { return nullptr; }
