@@ -162,9 +162,9 @@ void PlayerController::OnMouseButtonDown(Vector2)
     }
     else if (isRightClick)
     {
-        if (rayHasEmpty && hotbar)
+        if (rayPlaceValid && hotbar)
         {
-            grid->CreateBlockAt(rayEmptyGx, rayEmptyGy, rayEmptyGz, hotbar->GetSelectedSlot());
+            grid->CreateBlockAt(rayPlaceGx, rayPlaceGy, rayPlaceGz, hotbar->GetSelectedSlot());
             rayHitValid = false;
         }
     }

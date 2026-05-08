@@ -68,7 +68,7 @@ private:
 
 		bool newHit = false;
 		rayHitValid = false;
-		rayHasEmpty = false;
+		rayPlaceValid = false;
 
 		if (grid && cameraObject)
 		{
@@ -76,6 +76,9 @@ private:
 			Vector3 rayDir = getLookDirection();
 			float stepSize = grid->GetBlockSize() * 0.4f;
 			Vector3 currentPos = rayStart;
+			bool hasPreviousEmpty = false;
+			int previousGx = 0, previousGy = 0, previousGz = 0;
+
 			for (int i = 0; i < kRaycastSteps; ++i)
 			{
 				int gx, gy, gz;
@@ -86,12 +89,21 @@ private:
 						newHit = true;
 						rayHitValid = true;
 						rayHitGx = gx; rayHitGy = gy; rayHitGz = gz;
+						if (hasPreviousEmpty && isNeighborCell(previousGx, previousGy, previousGz, gx, gy, gz))
+						{
+							rayPlaceValid = true;
+							rayPlaceGx = previousGx; rayPlaceGy = previousGy; rayPlaceGz = previousGz;
+						}
+						else
+						{
+							setPlacementCellFromHit(grid, currentPos, gx, gy, gz);
+						}
 						break;
 					}
 					else
 					{
-						rayHasEmpty = true;
-						rayEmptyGx = gx; rayEmptyGy = gy; rayEmptyGz = gz;
+						hasPreviousEmpty = true;
+						previousGx = gx; previousGy = gy; previousGz = gz;
 					}
 				}
 				currentPos = currentPos + rayDir * stepSize;
@@ -101,6 +113,41 @@ private:
 			grid->SetHighlightBlock(rayHitGx, rayHitGy, rayHitGz);
 		else if (grid)
 			grid->ClearHighlight();
+	}
+
+	bool isNeighborCell(int ax, int ay, int az, int bx, int by, int bz) const
+	{
+		int dist = std::abs(ax - bx) + std::abs(ay - by) + std::abs(az - bz);
+		return dist == 1;
+	}
+
+	void setPlacementCellFromHit(WorldGridComponent *grid, const Vector3 &hitPos, int gx, int gy, int gz)
+	{
+		Vector3 center = grid->GridToWorld(gx, gy, gz);
+		float dx = hitPos.x - center.x;
+		float dy = hitPos.y - center.y;
+		float dz = hitPos.z - center.z;
+
+		float ax = std::abs(dx);
+		float ay = std::abs(dy);
+		float az = std::abs(dz);
+
+		int px = gx;
+		int py = gy;
+		int pz = gz;
+
+		if (ax >= ay && ax >= az)
+			px += (dx >= 0.0f) ? 1 : -1;
+		else if (ay >= ax && ay >= az)
+			py += (dy >= 0.0f) ? 1 : -1;
+		else
+			pz += (dz >= 0.0f) ? 1 : -1;
+
+		if (py >= 0 && !grid->HasBlock(px, py, pz))
+		{
+			rayPlaceValid = true;
+			rayPlaceGx = px; rayPlaceGy = py; rayPlaceGz = pz;
+		}
 	}
 
 	WorldGridComponent *findGrid()
@@ -242,8 +289,8 @@ private:
 
 	bool rayHitValid = false;
 	int rayHitGx = 0, rayHitGy = 0, rayHitGz = 0; 
-	bool rayHasEmpty = false;
-	int rayEmptyGx = 0, rayEmptyGy = 0, rayEmptyGz = 0;
+	bool rayPlaceValid = false;
+	int rayPlaceGx = 0, rayPlaceGy = 0, rayPlaceGz = 0;
 
 	float hoverRayTimer = 0.0f;
 	static constexpr float kHoverRayInterval = 0.03f; 

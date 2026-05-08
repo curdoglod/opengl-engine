@@ -9,7 +9,6 @@ A lightweight **C++ game engine** built on **OpenGL 3.3 Core** and **SDL2**, fea
 ### Rendering Pipeline
 - **OpenGL 3.3 Core** profile with depth testing, back-face culling, and alpha blending
 - **Shadow Mapping** — directional light with depth FBO, 5×5 PCF soft shadows, slope-scaled bias, and border fade
-- **Frustum Culling** — sphere tests for 3D models, AABB tests for voxel chunks
 - **Lambert Lighting** — diffuse + ambient shading for models and voxels
 - **Voxel Optimization** — chunk-based meshing with only exposed faces rendered
 
@@ -107,7 +106,6 @@ opengl-2/
 │   │   ├── LightComponent.h      # Directional light & shadows
 │   │   ├── Model3DComponent.h    # 3D model rendering
 │   │   ├── VoxelRenderer.h       # Chunk-based voxel meshes
-│   │   ├── Frustum.h             # Gribb–Hartmann frustum culling
 │   │   ├── Rigidbody3D.h         # 3D physics body
 │   │   ├── BoxCollider3D.h       # 3D box collision
 │   │   └── ...
