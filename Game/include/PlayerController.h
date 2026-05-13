@@ -20,7 +20,7 @@ class PlayerController : public Component
 
 public:
 	PlayerController()
-		: moveSpeed(120.0f / 35.0f), cameraObject(nullptr), eyeHeight(30.0f / 35.0f), yaw(0.0f), pitch(0.0f), mouseSensitivity(0.15f), velocityY(0.0f), gravity(-600.0f / 35.0f), isGrounded(false), jumpSpeed(220.0f / 35.0f)
+		: moveSpeed(120.0f / 35.0f), cameraObject(nullptr), eyeHeight(2.0f), yaw(0.0f), pitch(0.0f), mouseSensitivity(0.15f), velocityY(0.0f), gravity(-600.0f / 35.0f), isGrounded(false), jumpSpeed(220.0f / 35.0f)
 	{
 	}
 
@@ -170,105 +170,119 @@ private:
 	}
 
 
-	float getGroundLevel(WorldGridComponent *grid, const Vector3 &pos) const
+	float getBodyHalfWidth(WorldGridComponent *grid) const
 	{
-		int gx, gy, gz;
-		if (!grid->WorldToGrid(pos, gx, gy, gz))
-		{
-			return 0.0f;
-		}
-		for (int y = gy; y >= 0; --y)
-		{
-			if (grid->GetBlock(gx, y, gz))
-			{
-				Vector3 blockWorld = grid->GridToWorld(gx, y, gz);
-				return blockWorld.y + grid->GetBlockSize() * 0.5f;
-			}
-		}
-		return 0.0f;
+		return grid->GetBlockSize() * 0.3f;
 	}
 
-	// Thin body check against nearby blocks.
-	bool isCollidingHorizontally(WorldGridComponent *grid, const Vector3 &pos) const
+	int worldToGridIndex(float value, float blockSize) const
+	{
+		return (int)std::floor(value / blockSize + 0.5f);
+	}
+
+	bool isBodyColliding(WorldGridComponent *grid, const Vector3 &pos) const
 	{
 		float bs = grid->GetBlockSize();
-		float halfBody = bs * 0.3f;
+		float halfBody = getBodyHalfWidth(grid);
+		float inset = bs * 0.02f;
 
-		float testHeights[] = {pos.y + 1.0f, pos.y + eyeHeight * 0.5f};
+		int minGx = worldToGridIndex(pos.x - halfBody + inset, bs);
+		int maxGx = worldToGridIndex(pos.x + halfBody - inset, bs);
+		int minGy = worldToGridIndex(pos.y + inset, bs);
+		int maxGy = worldToGridIndex(pos.y + eyeHeight - inset, bs);
+		int minGz = worldToGridIndex(pos.z - halfBody + inset, bs);
+		int maxGz = worldToGridIndex(pos.z + halfBody - inset, bs);
 
-		float offsets[][2] = {
-			{halfBody, 0.0f},
-			{-halfBody, 0.0f},
-			{0.0f, halfBody},
-			{0.0f, -halfBody}};
-
-		for (float h : testHeights)
-		{
-			for (auto &off : offsets)
-			{
-				int gx, gy, gz;
-				Vector3 probe(pos.x + off[0], h, pos.z + off[1]);
-				if (grid->WorldToGrid(probe, gx, gy, gz))
-				{
-					if (grid->GetBlock(gx, gy, gz))
-					{
+		for (int gy = minGy; gy <= maxGy; ++gy)
+			for (int gz = minGz; gz <= maxGz; ++gz)
+				for (int gx = minGx; gx <= maxGx; ++gx)
+					if (grid->HasBlock(gx, gy, gz))
 						return true;
-					}
-				}
-			}
-			int gx, gy, gz;
-			if (grid->WorldToGrid(Vector3(pos.x, h, pos.z), gx, gy, gz))
-			{
-				if (grid->GetBlock(gx, gy, gz))
-				{
-					return true;
-				}
-			}
-		}
+
 		return false;
 	}
 
-	void pushOutOfBlocks(WorldGridComponent *grid, Vector3 &pos) const
+	float highestBlockTopInsideBody(WorldGridComponent *grid, const Vector3 &pos) const
 	{
 		float bs = grid->GetBlockSize();
-		float checkY = pos.y + 1.0f;
-		int gx, gy, gz;
-		if (!grid->WorldToGrid(Vector3(pos.x, checkY, pos.z), gx, gy, gz))
-			return;
-		if (!grid->GetBlock(gx, gy, gz))
-			return;
+		float halfBody = getBodyHalfWidth(grid);
+		float inset = bs * 0.02f;
+		float result = -100000.0f;
 
-		Vector3 blockCenter = grid->GridToWorld(gx, gy, gz);
-		float dx = pos.x - blockCenter.x;
-		float dz = pos.z - blockCenter.z;
+		int minGx = worldToGridIndex(pos.x - halfBody + inset, bs);
+		int maxGx = worldToGridIndex(pos.x + halfBody - inset, bs);
+		int minGy = worldToGridIndex(pos.y, bs);
+		int maxGy = worldToGridIndex(pos.y + eyeHeight - inset, bs);
+		int minGz = worldToGridIndex(pos.z - halfBody + inset, bs);
+		int maxGz = worldToGridIndex(pos.z + halfBody - inset, bs);
 
-		float absDx = std::abs(dx);
-		float absDz = std::abs(dz);
-		float halfBlock = bs * 0.5f;
-		float halfBody = bs * 0.3f;
-
-		if (absDx >= absDz)
+		for (int gy = minGy; gy <= maxGy; ++gy)
 		{
-			if (dx >= 0)
+			for (int gz = minGz; gz <= maxGz; ++gz)
 			{
-				pos.x = blockCenter.x + halfBlock + halfBody + 0.1f;
-			}
-			else
-			{
-				pos.x = blockCenter.x - halfBlock - halfBody - 0.1f;
+				for (int gx = minGx; gx <= maxGx; ++gx)
+				{
+					if (grid->HasBlock(gx, gy, gz))
+					{
+						Vector3 blockCenter = grid->GridToWorld(gx, gy, gz);
+						result = std::max(result, blockCenter.y + bs * 0.5f);
+					}
+				}
 			}
 		}
-		else
+
+		return result;
+	}
+
+	void moveHorizontal(WorldGridComponent *grid, Vector3 &pos, float dx, float dz) const
+	{
+		if (!grid)
 		{
-			if (dz >= 0)
+			pos.x += dx;
+			pos.z += dz;
+			return;
+		}
+
+		Vector3 testX(pos.x + dx, pos.y, pos.z);
+		if (!isBodyColliding(grid, testX))
+			pos.x += dx;
+
+		Vector3 testZ(pos.x, pos.y, pos.z + dz);
+		if (!isBodyColliding(grid, testZ))
+			pos.z += dz;
+	}
+
+	void moveVertical(WorldGridComponent *grid, Vector3 &pos, float dt)
+	{
+		velocityY += gravity * dt;
+		isGrounded = false;
+
+		if (!grid)
+		{
+			pos.y += velocityY * dt;
+			return;
+		}
+
+		float dy = velocityY * dt;
+		Vector3 testY(pos.x, pos.y + dy, pos.z);
+
+		if (!isBodyColliding(grid, testY))
+		{
+			pos.y += dy;
+			return;
+		}
+
+		if (dy < 0.0f)
+		{
+			float groundY = highestBlockTopInsideBody(grid, testY);
+			if (groundY > -99999.0f)
 			{
-				pos.z = blockCenter.z + halfBlock + halfBody + 0.1f;
-			}
-			else
-			{
-				pos.z = blockCenter.z - halfBlock - halfBody - 0.1f;
+				pos.y = groundY;
+				isGrounded = true;
 			}
 		}
+
+		velocityY = 0.0f;
 	}
 
 private:

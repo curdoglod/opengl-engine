@@ -22,11 +22,6 @@ void PlayerController::Update(float dt)
     Vector3 pos = object->GetPosition3D();
     WorldGridComponent *grid = findGrid();
 
-    if (grid)
-    {
-        pushOutOfBlocks(grid, pos);
-    }
-
     float vertical = (input.IsKeyDown(SDLK_w) ? 1.0f : 0.0f) + (input.IsKeyDown(SDLK_s) ? -1.0f : 0.0f);
     float horizontal = (input.IsKeyDown(SDLK_d) ? 1.0f : 0.0f) + (input.IsKeyDown(SDLK_a) ? -1.0f : 0.0f);
 
@@ -52,25 +47,7 @@ void PlayerController::Update(float dt)
             // Move per-axis so walls still allow sliding.
             float dx = move.x * moveSpeed * dt;
             float dz = move.z * moveSpeed * dt;
-
-            if (grid)
-            {
-                Vector3 testX(pos.x + dx, pos.y, pos.z);
-                if (!isCollidingHorizontally(grid, testX))
-                {
-                    pos.x += dx;
-                }
-                Vector3 testZ(pos.x, pos.y, pos.z + dz);
-                if (!isCollidingHorizontally(grid, testZ))
-                {
-                    pos.z += dz;
-                }
-            }
-            else
-            {
-                pos.x += dx;
-                pos.z += dz;
-            }
+            moveHorizontal(grid, pos, dx, dz);
         }
     }
 
@@ -90,37 +67,7 @@ void PlayerController::Update(float dt)
         }
     }
 
-    velocityY += gravity * dt;
-    pos.y += velocityY * dt;
-
-    if (grid)
-    {
-        float groundY = getGroundLevel(grid, pos);
-        if (pos.y <= groundY)
-        {
-            pos.y = groundY;
-            velocityY = 0.0f;
-            isGrounded = true;
-        }
-        else
-        {
-            isGrounded = false;
-        }
-
-        float headY = pos.y + eyeHeight;
-        int gx, gy, gz;
-        if (grid->WorldToGrid(Vector3(pos.x, headY, pos.z), gx, gy, gz))
-        {
-            if (grid->GetBlock(gx, gy, gz))
-            {
-                Vector3 blockWorld = grid->GridToWorld(gx, gy, gz);
-                float blockBottom = blockWorld.y - grid->GetBlockSize() * 0.5f;
-                pos.y = blockBottom - eyeHeight;
-                if (velocityY > 0.0f)
-                    velocityY = 0.0f;
-            }
-        }
-    }
+    moveVertical(grid, pos, dt);
 
     object->SetPosition(pos);
 
