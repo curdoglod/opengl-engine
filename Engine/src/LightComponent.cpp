@@ -4,7 +4,6 @@
 #include "object.h"
 #include "Model3DComponent.h"
 #include "CameraComponent.h"
-#include "VoxelRenderer.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <vector>
@@ -169,8 +168,6 @@ void LightComponent::RenderShadowMap(Scene* scene)
         glm::mat4 model = modelComp->ComputeModelMatrix();
         modelComp->RenderDepthPass(model, depthProgram);
     }
-
-    VoxelRenderer::Get().RenderChunksDepth(depthProgram, lightVP);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glUseProgram(0);

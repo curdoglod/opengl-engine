@@ -4,7 +4,6 @@
 #include "CameraComponent.h"
 #include "LightComponent.h"
 #include "Model3DComponent.h"
-#include "VoxelRenderer.h"
 #include "image.h"
 #include "text.h"
 #include "Renderer.h"
@@ -49,7 +48,6 @@ void RenderSystem::Render(Scene *scene)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glEnable(GL_DEPTH_TEST);
-    VoxelRenderer::Get().RenderChunks(view, projection, light);
 
     const auto &objects = scene->GetObjects();
     for (auto *obj : objects)

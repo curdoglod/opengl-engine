@@ -69,6 +69,15 @@ void PlayerController::Update(float dt)
 
     moveVertical(grid, pos, dt);
 
+    // Respawn if the player has fallen off the edge of the tiny 16x16 world.
+    if (grid && pos.y < kFallRespawnWorldY)
+    {
+        float spawnY = grid->GetSpawnHeight(0, 0);
+        pos = Vector3(0.0f, spawnY, 0.0f);
+        velocityY = 0.0f;
+        isGrounded = false;
+    }
+
     object->SetPosition(pos);
 
     if (cameraObject)
@@ -109,7 +118,8 @@ void PlayerController::OnMouseButtonDown(Vector2)
     }
     else if (isRightClick)
     {
-        if (rayPlaceValid && hotbar)
+        if (rayPlaceValid && hotbar
+            && !placementOverlapsPlayer(grid, rayPlaceGx, rayPlaceGy, rayPlaceGz))
         {
             grid->CreateBlockAt(rayPlaceGx, rayPlaceGy, rayPlaceGz, hotbar->GetSelectedSlot());
             rayHitValid = false;

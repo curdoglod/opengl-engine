@@ -16,7 +16,9 @@ class HotbarComponent;
 
 class PlayerController : public Component
 {
-	static constexpr int kRaycastSteps = 20;
+	static constexpr int kRaycastSteps = 48;
+	static constexpr float kRaycastStepFraction = 0.2f; // step = blockSize * fraction
+	static constexpr float kFallRespawnWorldY = -3.0f;
 
 public:
 	PlayerController()
@@ -74,7 +76,7 @@ private:
 		{
 			Vector3 rayStart = cameraObject->GetPosition3D();
 			Vector3 rayDir = getLookDirection();
-			float stepSize = grid->GetBlockSize() * 0.4f;
+			float stepSize = grid->GetBlockSize() * kRaycastStepFraction;
 			Vector3 currentPos = rayStart;
 			bool hasPreviousEmpty = false;
 			int previousGx = 0, previousGy = 0, previousGz = 0;
@@ -148,6 +150,32 @@ private:
 			rayPlaceValid = true;
 			rayPlaceGx = px; rayPlaceGy = py; rayPlaceGz = pz;
 		}
+	}
+
+	// Block AABB at (px,py,pz) overlapping the player capsule means placing it
+	// would trap the player inside geometry.
+	bool placementOverlapsPlayer(WorldGridComponent *grid, int px, int py, int pz) const
+	{
+		if (!object) return false;
+		float bs = grid->GetBlockSize();
+		float half = bs * 0.5f;
+		Vector3 center = grid->GridToWorld(px, py, pz);
+
+		Vector3 pos = object->GetPosition3D();
+		float bodyHalf = getBodyHalfWidth(grid);
+		float playerMinY = pos.y;
+		float playerMaxY = pos.y + eyeHeight;
+
+		float blockMinX = center.x - half;
+		float blockMaxX = center.x + half;
+		float blockMinY = center.y - half;
+		float blockMaxY = center.y + half;
+		float blockMinZ = center.z - half;
+		float blockMaxZ = center.z + half;
+
+		return (pos.x - bodyHalf < blockMaxX) && (pos.x + bodyHalf > blockMinX)
+			&& (playerMinY < blockMaxY) && (playerMaxY > blockMinY)
+			&& (pos.z - bodyHalf < blockMaxZ) && (pos.z + bodyHalf > blockMinZ);
 	}
 
 	WorldGridComponent *findGrid()
@@ -254,14 +282,28 @@ private:
 
 	void moveVertical(WorldGridComponent *grid, Vector3 &pos, float dt)
 	{
-		velocityY += gravity * dt;
-		isGrounded = false;
-
 		if (!grid)
 		{
+			velocityY += gravity * dt;
 			pos.y += velocityY * dt;
+			isGrounded = false;
 			return;
 		}
+
+
+		if (isGrounded && velocityY <= 0.0f)
+		{
+			Vector3 probe(pos.x, pos.y - grid->GetBlockSize() * 0.05f, pos.z);
+			if (isBodyColliding(grid, probe))
+			{
+				velocityY = 0.0f;
+				return;
+			}
+			isGrounded = false;
+		}
+
+		velocityY += gravity * dt;
+		isGrounded = false;
 
 		float dy = velocityY * dt;
 		Vector3 testY(pos.x, pos.y + dy, pos.z);
